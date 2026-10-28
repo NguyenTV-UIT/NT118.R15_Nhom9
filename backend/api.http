@@ -71,7 +71,7 @@ Content-Type: application/json
 GET {{baseUrl}}/users/3
 Authorization: Bearer {{token}}
 
-### Trang Home: danh sách gợi ý
+### (1) Trang Home: kết quả mặc định (sắp theo matchScore)
 GET {{baseUrl}}/home/feed?limit=10
 Authorization: Bearer {{token}}
 
@@ -84,4 +84,8 @@ Content-Type: application/json
 
 ### Danh sách match
 GET {{baseUrl}}/home/matches
+Authorization: Bearer {{token}}
+
+### (2) Tìm kiếm có filter (filter nào không cần thì xoá khỏi URL)
+GET {{baseUrl}}/home/search?gender=female&minAge=18&maxAge=25&maxDistanceKm=20&interestIds=1,2,3&hasPhoto=true&sort=score&limit=20
 Authorization: Bearer {{token}}

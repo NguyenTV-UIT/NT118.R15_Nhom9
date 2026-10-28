@@ -1,42 +1,179 @@
 const db = require('../../config/db');
 const ApiError = require('../../utils/ApiError');
+const { ageFromBirthday } = require('../../utils/age');
 const usersService = require('../users/users.service');
+const matching = require('./matching');
 
-// Khoảng cách (km) giữa ứng viên p và người dùng hiện tại me; NULL nếu 1 trong 2 chưa có vị trí.
-const DISTANCE_SQL = `CASE WHEN p.latitude IS NULL OR me.latitude IS NULL THEN NULL
-  ELSE ST_Distance_Sphere(POINT(p.longitude, p.latitude), POINT(me.longitude, me.latitude)) / 1000 END`;
+const CANDIDATE_POOL = 300; // số ứng viên tối đa lấy ra để chấm điểm mỗi lần
+
+/** Thông tin người xem: giới tính, vị trí, tuổi, sở thích, tiêu chí đã lưu. */
+async function loadViewer(userId) {
+  const [row] = await db.query(
+    `SELECT p.gender, p.birthday, p.latitude, p.longitude,
+            pr.interested_in, pr.min_age, pr.max_age, pr.max_distance_km
+       FROM profiles p LEFT JOIN preferences pr ON pr.user_id = p.user_id
+      WHERE p.user_id = ?`,
+    [userId],
+  );
+  if (!row) throw ApiError.notFound('Không tìm thấy hồ sơ');
+  const interestIds = (await db.query('SELECT interest_id FROM user_interests WHERE user_id = ?', [userId])).map(
+    (r) => Number(r.interest_id),
+  );
+  return {
+    id: userId,
+    gender: row.gender,
+    age: ageFromBirthday(row.birthday),
+    lat: row.latitude == null ? null : Number(row.latitude),
+    lng: row.longitude == null ? null : Number(row.longitude),
+    interestIds,
+    prefs: {
+      gender: row.interested_in || 'everyone',
+      minAge: row.min_age ?? 18,
+      maxAge: row.max_age ?? 100,
+      maxDistanceKm: row.max_distance_km ?? null,
+    },
+  };
+}
 
 /**
- * Danh sách gợi ý cho trang Home (thẻ để quẹt).
- * Lọc theo: giới tính & độ tuổi mình muốn, ứng viên cũng muốn giới tính của mình,
- * khoảng cách tối đa, bỏ người đã quẹt, đã chặn / bị chặn.
+ * Lõi tìm ứng viên: lọc bằng SQL rồi chấm điểm bằng matching.js.
+ * filters: { gender, minAge, maxAge, maxDistanceKm, strictDistance, interestIds, city, q,
+ *            hasPhoto, sort: 'score'|'distance'|'newest'|'active', limit }
  */
-async function getFeed(userId, limit) {
+async function findCandidates(viewer, f) {
+  const hasLoc = viewer.lat != null && viewer.lng != null;
+  // Toạ độ lấy từ DB (kiểu số) nên nhúng trực tiếp vào SQL an toàn
+  const distanceExpr = hasLoc
+    ? `CASE WHEN p.latitude IS NULL THEN NULL
+       ELSE ST_Distance_Sphere(POINT(p.longitude, p.latitude), POINT(${viewer.lng}, ${viewer.lat})) / 1000 END`
+    : 'NULL';
+  const myInterests = viewer.interestIds.map(Number).filter(Number.isInteger);
+  const commonExpr = myInterests.length
+    ? `(SELECT COUNT(*) FROM user_interests ui WHERE ui.user_id = u.id AND ui.interest_id IN (${myInterests.join(',')}))`
+    : '0';
+
+  const where = [
+    'u.id <> ?',
+    "u.status = 'active'",
+    // ứng viên cũng phải muốn tìm giới tính của mình
+    "(cp.interested_in IS NULL OR cp.interested_in = 'everyone' OR cp.interested_in = ?)",
+    'TIMESTAMPDIFF(YEAR, p.birthday, UTC_DATE()) BETWEEN ? AND ?',
+    'NOT EXISTS (SELECT 1 FROM swipes s WHERE s.swiper_id = ? AND s.swiped_id = u.id)',
+    `NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = ? AND b.blocked_id = u.id)
+                                        OR (b.blocker_id = u.id AND b.blocked_id = ?))`,
+  ];
+  const params = [viewer.id, viewer.gender, f.minAge, f.maxAge, viewer.id, viewer.id, viewer.id];
+
+  if (f.gender && f.gender !== 'everyone') {
+    where.push('p.gender = ?');
+    params.push(f.gender);
+  }
+  if (hasLoc && f.maxDistanceKm) {
+    // Mặc định: người chưa bật vị trí vẫn hiện. Khi user tự chọn filter khoảng cách thì loại họ ra.
+    where.push(f.strictDistance ? `${distanceExpr} <= ?` : `(p.latitude IS NULL OR ${distanceExpr} <= ?)`);
+    params.push(f.maxDistanceKm);
+  }
+  if (f.interestIds?.length) {
+    where.push('EXISTS (SELECT 1 FROM user_interests fi WHERE fi.user_id = u.id AND fi.interest_id IN (?))');
+    params.push(f.interestIds);
+  }
+  if (f.city) {
+    where.push('p.city LIKE ?');
+    params.push(`%${f.city}%`);
+  }
+  if (f.q) {
+    where.push('p.display_name LIKE ?');
+    params.push(`%${f.q}%`);
+  }
+  if (f.hasPhoto) {
+    where.push('EXISTS (SELECT 1 FROM photos ph WHERE ph.user_id = u.id)');
+  }
+
+  const poolOrder = {
+    distance: '(distance_km IS NULL), distance_km, u.id DESC',
+    newest: 'u.created_at DESC, u.id DESC',
+  }[f.sort] || 'u.last_active_at DESC, u.id DESC';
+
   const rows = await db.query(
-    `SELECT u.id, p.display_name, p.birthday, p.gender, p.bio, p.job_title, p.school, p.city,
-            ${DISTANCE_SQL} AS distance_km
+    `SELECT u.id, u.last_active_at, u.created_at,
+            p.display_name, p.birthday, p.gender, p.bio, p.job_title, p.school, p.city,
+            ${distanceExpr} AS distance_km,
+            ${commonExpr} AS common_interests,
+            (SELECT COUNT(*) FROM user_interests ui2 WHERE ui2.user_id = u.id) AS interest_count,
+            EXISTS (SELECT 1 FROM photos ph2 WHERE ph2.user_id = u.id) AS has_photo,
+            EXISTS (SELECT 1 FROM swipes s2 WHERE s2.swiper_id = u.id AND s2.swiped_id = ?
+                                              AND s2.action IN ('like','superlike')) AS liked_me
        FROM users u
-       JOIN profiles p     ON p.user_id = u.id
-       JOIN profiles me    ON me.user_id = ?
-       JOIN preferences mp ON mp.user_id = me.user_id
+       JOIN profiles p ON p.user_id = u.id
        LEFT JOIN preferences cp ON cp.user_id = u.id
-      WHERE u.id <> me.user_id
-        AND u.status = 'active'
-        AND (mp.interested_in = 'everyone' OR p.gender = mp.interested_in)
-        AND (cp.interested_in IS NULL OR cp.interested_in = 'everyone' OR cp.interested_in = me.gender)
-        AND TIMESTAMPDIFF(YEAR, p.birthday, UTC_DATE()) BETWEEN mp.min_age AND mp.max_age
-        AND (${DISTANCE_SQL} IS NULL OR ${DISTANCE_SQL} <= mp.max_distance_km)
-        AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.swiper_id = me.user_id AND s.swiped_id = u.id)
-        AND NOT EXISTS (SELECT 1 FROM blocks b
-                         WHERE (b.blocker_id = me.user_id AND b.blocked_id = u.id)
-                            OR (b.blocker_id = u.id AND b.blocked_id = me.user_id))
-      ORDER BY (distance_km IS NULL), distance_km, u.last_active_at DESC, u.id DESC
+      WHERE ${where.join('\n        AND ')}
+      ORDER BY ${poolOrder}
       LIMIT ?`,
-    [userId, limit],
+    [viewer.id, ...params, CANDIDATE_POOL],
   );
 
-  const extras = await usersService.loadExtras(rows.map((r) => Number(r.id)));
-  return rows.map((r) => usersService.toPublicProfile(r, extras));
+  const me = { age: viewer.age, interestCount: myInterests.length, radiusKm: f.maxDistanceKm };
+  const scored = rows.map((r) => ({
+    row: r,
+    ...matching.score(
+      {
+        distanceKm: r.distance_km == null ? null : Number(r.distance_km),
+        commonInterests: Number(r.common_interests),
+        lastActiveAt: r.last_active_at,
+        age: ageFromBirthday(r.birthday),
+        hasPhoto: Boolean(r.has_photo),
+        hasBio: Boolean(r.bio),
+        interestCount: Number(r.interest_count),
+        likedMe: Boolean(r.liked_me),
+      },
+      me,
+    ),
+  }));
+
+  // Sắp xếp theo điểm (mặc định); các kiểu khác đã sắp sẵn bằng SQL
+  if (!f.sort || f.sort === 'score') scored.sort((a, b) => b.rankScore - a.rankScore);
+  const top = scored.slice(0, f.limit);
+
+  const extras = await usersService.loadExtras(top.map((s) => Number(s.row.id)));
+  return top.map(({ row, matchScore }) => ({
+    ...usersService.toPublicProfile(row, extras),
+    matchScore,
+    commonInterestCount: Number(row.common_interests),
+  }));
+}
+
+/**
+ * (1) KẾT QUẢ MẶC ĐỊNH cho trang Home - chưa search / chưa thêm filter.
+ * Dựa trên thông tin đã cung cấp khi đăng ký (giới tính muốn tìm, tuổi, vị trí, sở thích)
+ * và tiêu chí đã lưu (preferences). Sắp xếp theo matchScore.
+ */
+async function getFeed(userId, limit) {
+  const viewer = await loadViewer(userId);
+  return findCandidates(viewer, { ...viewer.prefs, limit, sort: 'score' });
+}
+
+/**
+ * (2) KẾT QUẢ KHI THÊM FILTER. Filter nào không gửi thì dùng tiêu chí đã lưu.
+ * Filter chỉ áp dụng cho lần tìm này, không ghi đè preferences
+ * (muốn lưu làm mặc định thì gọi PUT /users/me/preferences).
+ */
+async function search(userId, query) {
+  const viewer = await loadViewer(userId);
+  const f = {
+    gender: query.gender ?? viewer.prefs.gender,
+    minAge: query.minAge ?? viewer.prefs.minAge,
+    maxAge: query.maxAge ?? viewer.prefs.maxAge,
+    maxDistanceKm: query.maxDistanceKm ?? viewer.prefs.maxDistanceKm,
+    strictDistance: query.maxDistanceKm !== undefined,
+    interestIds: query.interestIds,
+    city: query.city,
+    q: query.q,
+    hasPhoto: query.hasPhoto,
+    sort: query.sort,
+    limit: query.limit,
+  };
+  if (f.minAge > f.maxAge) throw ApiError.badRequest('minAge phải nhỏ hơn hoặc bằng maxAge');
+  return findCandidates(viewer, f);
 }
 
 /** Quẹt like / pass / superlike. Nếu hai bên cùng like thì tạo match. */
@@ -145,4 +282,4 @@ async function unmatch(userId, matchId) {
   if (!result.affectedRows) throw ApiError.notFound('Không tìm thấy match');
 }
 
-module.exports = { getFeed, swipe, getMatches, unmatch };
+module.exports = { getFeed, search, swipe, getMatches, unmatch };

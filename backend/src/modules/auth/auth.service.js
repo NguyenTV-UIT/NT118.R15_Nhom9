@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
 const db = require('../../config/db');
 const ApiError = require('../../utils/ApiError');
+const { ageFromBirthday } = require('../../utils/age');
 const usersService = require('../users/users.service');
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -31,22 +32,49 @@ async function issueTokens(user, conn = db) {
   };
 }
 
-async function register({ email, password, displayName, birthday, gender }) {
+/**
+ * Tiêu chí tìm kiếm mặc định suy ra từ thông tin đăng ký:
+ *  - interestedIn: người dùng chọn lúc đăng ký, không chọn thì 'everyone'
+ *  - độ tuổi: quanh tuổi của người dùng (±5, tối thiểu 18)
+ *  - khoảng cách: 50km
+ */
+function defaultPreferences(birthday, interestedIn) {
+  const age = ageFromBirthday(birthday);
+  return {
+    interestedIn: interestedIn || 'everyone',
+    minAge: Math.max(18, age - 5),
+    maxAge: Math.min(100, Math.max(age + 5, 23)),
+    maxDistanceKm: 50,
+  };
+}
+
+async function register(data) {
+  const { email, password, displayName, birthday, gender } = data;
   const [existing] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
   if (existing) throw ApiError.conflict('Email đã được sử dụng');
 
   const passwordHash = await bcrypt.hash(password, 10);
+  const pref = defaultPreferences(birthday, data.interestedIn);
 
   const user = await db.transaction(async (conn) => {
     const [result] = await conn.query('INSERT INTO users (email, password_hash) VALUES (?, ?)', [email, passwordHash]);
     const userId = result.insertId;
-    await conn.query('INSERT INTO profiles (user_id, display_name, birthday, gender) VALUES (?, ?, ?, ?)', [
-      userId,
-      displayName,
-      birthday,
-      gender,
-    ]);
-    await conn.query('INSERT INTO preferences (user_id) VALUES (?)', [userId]);
+    await conn.query(
+      `INSERT INTO profiles (user_id, display_name, birthday, gender, city, latitude, longitude)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [userId, displayName, birthday, gender, data.city || null, data.latitude ?? null, data.longitude ?? null],
+    );
+    await conn.query(
+      'INSERT INTO preferences (user_id, interested_in, min_age, max_age, max_distance_km) VALUES (?, ?, ?, ?, ?)',
+      [userId, pref.interestedIn, pref.minAge, pref.maxAge, pref.maxDistanceKm],
+    );
+    if (data.interestIds?.length) {
+      // Bỏ qua id sở thích không tồn tại
+      await conn.query(
+        'INSERT IGNORE INTO user_interests (user_id, interest_id) SELECT ?, id FROM interests WHERE id IN (?)',
+        [userId, [...new Set(data.interestIds)]],
+      );
+    }
     return { id: userId, role: 'user' };
   });
 

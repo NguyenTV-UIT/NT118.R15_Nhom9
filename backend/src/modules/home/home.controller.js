@@ -18,3 +18,8 @@ exports.unmatch = async (req, res) => {
   await homeService.unmatch(req.user.id, req.params.matchId);
   ok(res, null, 'Đã huỷ match');
 };
+
+exports.search = async (req, res) => {
+  const list = await homeService.search(req.user.id, req.query);
+  ok(res, list, `Tìm thấy ${list.length} người`);
+};

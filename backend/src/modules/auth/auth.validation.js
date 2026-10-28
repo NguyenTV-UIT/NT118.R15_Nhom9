@@ -11,13 +11,24 @@ const birthday = z
   .refine((v) => ageFromBirthday(v) >= 18, 'Bạn phải đủ 18 tuổi')
   .refine((v) => ageFromBirthday(v) <= 100, 'Ngày sinh không hợp lệ');
 
-const register = z.object({
-  email,
-  password,
-  displayName: z.string().trim().min(1, 'Tên hiển thị không được trống').max(100),
-  birthday,
-  gender: z.enum(['male', 'female', 'other']),
-});
+const register = z
+  .object({
+    email,
+    password,
+    displayName: z.string().trim().min(1, 'Tên hiển thị không được trống').max(100),
+    birthday,
+    gender: z.enum(['male', 'female', 'other']),
+    // Không bắt buộc - dùng để tạo kết quả mặc định cho trang Home
+    interestedIn: z.enum(['male', 'female', 'everyone']).optional(),
+    city: z.string().trim().max(100).optional(),
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+    interestIds: z.array(z.number().int().positive()).max(10, 'Tối đa 10 sở thích').optional(),
+  })
+  .refine((d) => (d.latitude === undefined) === (d.longitude === undefined), {
+    message: 'Phải gửi cả latitude và longitude',
+    path: ['latitude'],
+  });
 
 const login = z.object({
   email,

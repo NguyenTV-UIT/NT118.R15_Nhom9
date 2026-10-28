@@ -106,7 +106,11 @@ Sơ đồ bảng (xem chi tiết trong `database/schema.sql`):
 
 Đã tạo sẵn bảng cho các phần sau để không phải đổi schema giữa chừng; API của chúng sẽ thêm ở 3 tuần hoàn thiện.
 
-## Lưu ý khi deploy lên VPS
+## Deploy lên VPS
+
+Xem hướng dẫn đầy đủ ở [`deploy/README.md`](../deploy/README.md).
+
+### Lưu ý
 
 - Đặt `NODE_ENV=production`, `PUBLIC_BASE_URL=http://<IP-VPS>` (dùng để tạo URL ảnh), `JWT_ACCESS_SECRET` là chuỗi ngẫu nhiên dài.
 - Tạo user MySQL riêng cho app, không dùng `root`.

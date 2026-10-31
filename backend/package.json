@@ -1,0 +1,30 @@
+{
+  "name": "dating-app-backend",
+  "version": "0.1.0",
+  "description": "Backend REST API cho ứng dụng hẹn hò - Nhóm 9 NT118.R15",
+  "main": "src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node scripts/db-init.js",
+    "db:seed": "node scripts/db-seed.js",
+    "db:reset": "node scripts/db-init.js && node scripts/db-seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.11.5",
+    "zod": "^3.24.1"
+  },
+  "license": "MIT"
+}

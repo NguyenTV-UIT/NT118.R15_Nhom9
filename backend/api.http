@@ -1,0 +1,91 @@
+### Test nhanh API bằng extension "REST Client" (VS Code) hoặc IntelliJ HTTP Client.
+### Chạy request Login trước, copy accessToken vào biến @token.
+
+@baseUrl = http://localhost:3000/api
+@token = PASTE_ACCESS_TOKEN_HERE
+
+### Health check
+GET {{baseUrl}}/health
+
+### Đăng ký
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "test@demo.local",
+  "password": "123456",
+  "displayName": "Test",
+  "birthday": "2004-06-01",
+  "gender": "male"
+}
+
+### Đăng nhập (tài khoản seed)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "an@demo.local", "password": "123456" }
+
+### Làm mới token
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "PASTE_REFRESH_TOKEN_HERE" }
+
+### Hồ sơ của tôi
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{token}}
+
+### Cập nhật hồ sơ + vị trí
+PUT {{baseUrl}}/users/me/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "bio": "Sinh viên UIT",
+  "jobTitle": "Sinh viên",
+  "school": "UIT",
+  "city": "Thủ Đức",
+  "latitude": 10.8700,
+  "longitude": 106.8031
+}
+
+### Cập nhật tiêu chí tìm kiếm
+PUT {{baseUrl}}/users/me/preferences
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "interestedIn": "female", "minAge": 18, "maxAge": 30, "maxDistanceKm": 30 }
+
+### Danh sách sở thích
+GET {{baseUrl}}/users/interests
+Authorization: Bearer {{token}}
+
+### Chọn sở thích
+PUT {{baseUrl}}/users/me/interests
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "interestIds": [1, 3, 5] }
+
+### Xem hồ sơ người khác
+GET {{baseUrl}}/users/3
+Authorization: Bearer {{token}}
+
+### (1) Trang Home: kết quả mặc định (sắp theo matchScore)
+GET {{baseUrl}}/home/feed?limit=10
+Authorization: Bearer {{token}}
+
+### Quẹt (like | pass | superlike)
+POST {{baseUrl}}/home/swipe
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "targetId": 3, "action": "like" }
+
+### Danh sách match
+GET {{baseUrl}}/home/matches
+Authorization: Bearer {{token}}
+
+### (2) Tìm kiếm có filter (filter nào không cần thì xoá khỏi URL)
+GET {{baseUrl}}/home/search?gender=female&minAge=18&maxAge=25&maxDistanceKm=20&interestIds=1,2,3&hasPhoto=true&sort=score&limit=20
+Authorization: Bearer {{token}}

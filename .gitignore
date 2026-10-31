@@ -33,3 +33,8 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Node.js (backend)
+node_modules/
+.env
+backend/uploads/

@@ -1,0 +1,21 @@
+# MySQL 8 cho môi trường dev (không bắt buộc - có thể dùng MySQL cài sẵn / XAMPP).
+#   docker compose up -d
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: dating_app_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: dating_app
+      MYSQL_USER: dating_app
+      MYSQL_PASSWORD: change_me
+      TZ: UTC
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mysql_data:

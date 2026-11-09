@@ -24,6 +24,8 @@ public class InterestsActivity extends AppCompatActivity {
     private TextView tvInterestCount;
     private ChipGroup chipGroupInterests;
     private boolean isEditMode = false;
+    private boolean choicesLoaded;
+    private ArrayList<String> pendingSelected = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -103,6 +105,53 @@ public class InterestsActivity extends AppCompatActivity {
 
         // Nút Lưu thay đổi / Tiếp tục
         findViewById(R.id.btnContinue).setOnClickListener(v -> checkAndContinue());
+        ArrayList<String> restored = savedInstanceState == null ? initialSelected : savedInstanceState.getStringArrayList("interestDraft");
+        loadInterestChoices(restored == null ? new ArrayList<>() : restored);
+    }
+
+    private void loadInterestChoices(ArrayList<String> selected) {
+        choicesLoaded = false;
+        pendingSelected = new ArrayList<>(selected);
+        findViewById(R.id.btnContinue).setEnabled(false);
+        chipGroupInterests.removeAllViews();
+        tvInterestCount.setText("Đang tải sở thích…");
+        new com.datezone.app.api.ApiClient(this).request(this, "GET", "users/interests", null,
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                        org.json.JSONArray choices = response.getJSONArray("data");
+                        for (int i = 0; i < choices.length(); i++) {
+                            Chip chip = (Chip) getLayoutInflater().inflate(R.layout.item_profile_interest_chip, chipGroupInterests, false);
+                            chip.setId(View.generateViewId());
+                            chip.setText(choices.getJSONObject(i).getString("name"));
+                            chip.setCheckable(true);
+                            chip.setClickable(true);
+                            chip.setFocusable(true);
+                            chip.setChecked(selected.contains(chip.getText().toString()));
+                            chip.setOnCheckedChangeListener((button, checked) -> {
+                                if (checked && getSelectedInterests().size() > 20) {
+                                    chip.setChecked(false);
+                                    Toast.makeText(InterestsActivity.this, "Chọn tối đa 20 sở thích", Toast.LENGTH_SHORT).show();
+                                }
+                                updateSelectedCount();
+                            });
+                            chipGroupInterests.addView(chip);
+                        }
+                        updateSelectedCount();
+                        choicesLoaded = true;
+                        findViewById(R.id.btnContinue).setEnabled(true);
+                        findViewById(R.id.btnContinue).setOnClickListener(v -> checkAndContinue());
+                    }
+                    @Override public void onError(String message) {
+                        tvInterestCount.setText(message);
+                        findViewById(R.id.btnContinue).setEnabled(true);
+                        findViewById(R.id.btnContinue).setOnClickListener(v -> loadInterestChoices(selected));
+                    }
+                });
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putStringArrayList("interestDraft", choicesLoaded ? new ArrayList<>(getSelectedInterests()) : pendingSelected);
+        super.onSaveInstanceState(state);
     }
 
     private void setupChipListeners() {

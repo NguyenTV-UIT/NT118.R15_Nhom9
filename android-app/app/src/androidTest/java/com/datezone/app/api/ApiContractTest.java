@@ -5,6 +5,7 @@ import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.core.app.ActivityScenario;
 import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
@@ -179,6 +180,132 @@ public class ApiContractTest {
                 fail("Oversized file must fail locally");
             } catch (java.io.IOException expected) { assertTrue(expected.getMessage().contains("5 MB")); }
         } finally { photo.delete(); }
+    }
+
+    private JSONObject editorUser(String name, int height) throws Exception {
+        return new JSONObject("{\"id\":91,\"displayName\":\"Server Name\",\"bio\":\"Server bio\","
+                + "\"gender\":\"male\",\"showGender\":false,\"heightCm\":170,\"weightKg\":65,"
+                + "\"birthday\":\"2002-06-01\",\"city\":\"City\",\"latitude\":10.8,\"longitude\":106.7,"
+                + "\"photos\":[{\"id\":1,\"url\":\"\",\"position\":0},{\"id\":2,\"url\":\"\",\"position\":1}],"
+                + "\"interests\":[{\"id\":1,\"name\":\"Music\"},{\"id\":2,\"name\":\"Coffee\"},{\"id\":3,\"name\":\"Travel\"}]}" )
+                .put("displayName", name).put("heightCm", height);
+    }
+
+    private JSONObject editorOptions() throws Exception {
+        return new JSONObject("{\"gender\":[{\"code\":\"male\",\"label\":\"Male\"},{\"code\":\"female\",\"label\":\"Female\"}],"
+                + "\"smoking\":[{\"code\":\"never\",\"label\":\"Never\",\"shortLabel\":\"No\"}]}" );
+    }
+
+    private java.util.Map<String, String> editorFields() {
+        java.util.Map<String, String> fields = new java.util.LinkedHashMap<>();
+        fields.put("displayName", "Server Name"); fields.put("bio", "Server bio"); fields.put("gender", "Male");
+        fields.put("heightCm", "170 cm"); fields.put("weightKg", "65 kg"); fields.put("city", "City");
+        return fields;
+    }
+
+    @Test public void unchangedEditorDoesNotOverwritePrivateFieldsOrPhotos() throws Exception {
+        JSONObject patch = ProfileForm.patch(editorUser("Server Name", 170), editorOptions(), editorFields(), new JSONObject());
+        assertEquals(0, patch.length());
+    }
+
+    @Test public void editorSendsNumericMeasurementsAndNullsClearedOptionalFields() throws Exception {
+        java.util.Map<String, String> fields = editorFields();
+        fields.put("displayName", "Updated Name"); fields.put("heightCm", "172 cm"); fields.put("weightKg", "");
+        JSONObject patch = ProfileForm.patch(editorUser("Server Name", 170), editorOptions(), fields, new JSONObject());
+        assertEquals("Updated Name", patch.getString("displayName"));
+        assertEquals(172, patch.getInt("heightCm"));
+        assertTrue(patch.get("heightCm") instanceof Number);
+        assertTrue(patch.has("weightKg") && patch.isNull("weightKg"));
+        assertFalse(patch.has("birthday")); assertFalse(patch.has("showGender")); assertFalse(patch.has("photos"));
+    }
+
+    @Test public void changingCityClearsStaleCoordinatesButUnchangedCityPreservesThem() throws Exception {
+        java.util.Map<String, String> fields = editorFields();
+        fields.put("city", "New City");
+        JSONObject patch = ProfileForm.patch(editorUser("Server Name", 170), editorOptions(), fields, new JSONObject());
+        assertEquals("New City", patch.getString("city"));
+        assertTrue(patch.has("latitude") && patch.isNull("latitude"));
+        assertTrue(patch.has("longitude") && patch.isNull("longitude"));
+    }
+
+    @Test public void editorRejectsInvalidMeasurementInsteadOfSavingAnIncorrectNumber() throws Exception {
+        java.util.Map<String, String> fields = editorFields();
+        for (String invalid : new String[]{"abc", "170.5", "201", "-1"}) {
+            fields.put("heightCm", invalid);
+            try {
+                ProfileForm.patch(editorUser("Server Name", 170), editorOptions(), fields, new JSONObject());
+                fail("Invalid height must be rejected: " + invalid);
+            } catch (IllegalArgumentException expected) { }
+        }
+    }
+
+    @Test public void editorKeepsOptionCodesInsteadOfSendingDisplayLabels() throws Exception {
+        JSONObject patch = ProfileForm.patch(editorUser("Server Name", 170), editorOptions(), editorFields(), ApiUi.data("smoking", "never"));
+        assertEquals("never", patch.getString("smoking"));
+        assertEquals("No", ProfileForm.label(editorOptions(), "smoking", "never"));
+    }
+
+    @Test public void profileEditorLoadsServerDataAndPersistsChangesBeforeClosing() throws Exception {
+        Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences realPrefs = target.getSharedPreferences("datezone_session", Context.MODE_PRIVATE);
+        SharedPreferences legacyPrefs = target.getSharedPreferences(com.datezone.app.ProfileEditActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        java.util.Map<String, ?> savedSession = new java.util.HashMap<>(realPrefs.getAll());
+        java.util.Map<String, ?> savedLegacy = new java.util.HashMap<>(legacyPrefs.getAll());
+        JSONObject original = editorUser("Server Name", 170);
+        JSONObject updated = editorUser("Updated Name", 172);
+        try (FakeServer server = new FakeServer(
+                new Reply(200, ApiUi.data("success", true, "data", original).toString()),
+                new Reply(200, ApiUi.data("success", true, "data", editorOptions()).toString()),
+                new Reply(200, ApiUi.data("success", true, "data", updated).toString()))) {
+            SessionStore realSession = new SessionStore(target);
+            realSession.clear();
+            realSession.saveTokens(ApiUi.data("accessToken", "test-access", "refreshToken", "test-refresh"));
+            legacyPrefs.edit().putString(com.datezone.app.ProfileEditActivity.KEY_NAME, "Wrong local name").commit();
+            try (ActivityScenario<com.datezone.app.ProfileEditActivity> scenario = ActivityScenario.launch(com.datezone.app.ProfileEditActivity.class)) {
+                long deadline = android.os.SystemClock.uptimeMillis() + 8000;
+                java.util.concurrent.atomic.AtomicBoolean ready = new java.util.concurrent.atomic.AtomicBoolean();
+                while (!ready.get() && android.os.SystemClock.uptimeMillis() < deadline) {
+                    scenario.onActivity(activity -> ready.set("Server Name".equals(
+                            ((android.widget.EditText) activity.findViewById(com.datezone.app.R.id.edtEditProfileName)).getText().toString())
+                            && activity.findViewById(com.datezone.app.R.id.btnEditProfileSave).isEnabled()));
+                    if (!ready.get()) android.os.SystemClock.sleep(40);
+                }
+                assertTrue("Editor must load the current account from server", ready.get());
+                scenario.onActivity(activity -> {
+                    assertEquals("2/6 ảnh", ((android.widget.TextView) activity.findViewById(com.datezone.app.R.id.tvEditProfilePhotoCount)).getText().toString());
+                    ((android.widget.EditText) activity.findViewById(com.datezone.app.R.id.edtEditProfileName)).setText("Updated Name");
+                    ((android.widget.EditText) activity.findViewById(com.datezone.app.R.id.edtEditProfileHeight)).setText("172");
+                    activity.findViewById(com.datezone.app.R.id.btnEditProfileSave).performClick();
+                });
+                List<String> requests = server.requests();
+                assertTrue(requests.get(2).contains("PUT /api/users/me/profile"));
+                JSONObject patch = new JSONObject(requests.get(2).substring(requests.get(2).indexOf('{')));
+                assertEquals("Updated Name", patch.getString("displayName"));
+                assertEquals(172, patch.getInt("heightCm"));
+                assertEquals(2, patch.length());
+                deadline = android.os.SystemClock.uptimeMillis() + 4000;
+                while (!"Updated Name".equals(realSession.user().optString("displayName")) && android.os.SystemClock.uptimeMillis() < deadline)
+                    android.os.SystemClock.sleep(40);
+                assertEquals("Updated Name", realSession.user().getString("displayName"));
+                assertFalse(realSession.user().getBoolean("showGender"));
+            }
+        } finally {
+            restorePrefs(realPrefs, savedSession);
+            restorePrefs(legacyPrefs, savedLegacy);
+        }
+    }
+
+    private void restorePrefs(SharedPreferences prefs, java.util.Map<String, ?> saved) {
+        SharedPreferences.Editor editor = prefs.edit().clear();
+        for (java.util.Map.Entry<String, ?> entry : saved.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) editor.putString(entry.getKey(), (String) value);
+            else if (value instanceof Integer) editor.putInt(entry.getKey(), (Integer) value);
+            else if (value instanceof Long) editor.putLong(entry.getKey(), (Long) value);
+            else if (value instanceof Float) editor.putFloat(entry.getKey(), (Float) value);
+            else if (value instanceof Boolean) editor.putBoolean(entry.getKey(), (Boolean) value);
+        }
+        editor.commit();
     }
 
     @Test public void expiredAccessTokenRotatesTokensAndRetriesSwipeWithSameBody() throws Exception {

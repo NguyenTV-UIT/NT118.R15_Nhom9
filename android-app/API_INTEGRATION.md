@@ -69,8 +69,18 @@ bước onboarding. SessionStore lưu bản hồ sơ gần nhất để hiển t
 
 ## Phạm vi còn lại
 
-Danh sách lượt thích/tương hợp, chat, cuộc gọi, màn chỉnh sửa hồ sơ cũ, đổi
-email, xoá tài khoản và báo cáo/chặn chưa nối trong đợt này. Các bộ lọc chưa
+Chỉnh sửa và xem trước hồ sơ đã đọc `/users/me`, không dùng thông tin mẫu hay
+UserProfilePrefs cũ. Editor tải nhãn lựa chọn từ `/meta/options`, lưu các trường
+đã đổi bằng `/users/me/profile`, lưu sở thích bằng `/users/me/interests` và
+thêm/xoá ảnh qua API ảnh. Ảnh được lưu ngay khi thêm/xoá; các trường và sở thích
+được lưu bằng nút Lưu. Tab Hồ sơ tải lại dữ liệu khi quay về từ editor.
+Editor giữ bản nháp khi xoay màn hình, không ghi đè ngày sinh/showGender hay
+trường khác không có trên form. Nếu đổi tên thành phố thủ công, xoá cặp toạ độ
+cũ để tránh tìm kiếm theo vị trí không còn đúng. Lỗi request giữ form để thử lại;
+nếu thông tin cơ bản đã lưu nhưng sở thích lỗi, app thông báo phần chưa lưu.
+
+Danh sách lượt thích/tương hợp, chat, cuộc gọi, đổi email, xoá tài khoản và
+báo cáo/chặn chưa nối trong đợt này. Các bộ lọc chưa
 có trong hợp đồng tìm kiếm vẫn vô hiệu hóa. Search hỗ trợ giới tính, tuổi,
 khoảng cách, sở thích (tối đa 10); không ghi đè preferences đã lưu trên server.
 OTP cho đổi email chưa có API nên không mô phỏng xác thực thành công.
@@ -92,10 +102,12 @@ token thu hồi, logout trong lúc refresh, lỗi validation, multipart ảnh v�
 giới hạn 5 MB. Các test HTTP chỉ chạy khi URL đúng địa chỉ test ở trên.
 Sau test phải build/cài lại không có tham số test để dùng URL API bình thường.
 
-Đã chạy 15 instrumentation test thành công. Bản backend local chưa có `.env`
-và `node_modules`. Server EC2 đã được kiểm tra health qua API công khai;
-`GET /api/meta/options` và `POST /api/auth/password/forgot` đang trả 404.
-Gửi `{}` tới `/api/auth/register` còn báo bắt buộc displayName/birthday/gender,
-khác hợp đồng v3 chỉ yêu cầu email/password. Cần kiểm tra nhánh/tiến trình
-backend đang phục vụ cổng 80 và restart sau khi deploy. Chưa kiểm thử toàn bộ
-luồng tài khoản/SMTP với một tài khoản thật.
+Đã chạy 21 instrumentation test thành công, gồm mở editor với dữ liệu server
+khác dữ liệu local, sửa tên/chiều cao, kiểm tra request PUT và dữ liệu cache sau
+lưu. Các test bổ sung kiểm tra số đo, xoá giá trị tuỳ chọn, mã lựa chọn và giữ
+nguyên ngày sinh/showGender khi không chỉnh sửa.
+
+Backend v3 trên EC2 đã được kiểm tra đăng ký, đăng nhập và lấy hồ sơ thật.
+Người dùng đã xác nhận nhận được OTP email sau khi cấu hình SMTP. Các thay đổi
+editor được kiểm thử bằng server giả lập; không sửa hồ sơ tài khoản thật trong
+bài kiểm tra tự động. Backend local chưa có `.env` và `node_modules`.

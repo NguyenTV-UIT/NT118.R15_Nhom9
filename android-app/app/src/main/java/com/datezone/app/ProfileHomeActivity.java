@@ -56,6 +56,9 @@ public class ProfileHomeActivity extends AppCompatActivity {
         setupButtons();
         setupBottomNavigation();
         loadSavedProfileData();
+    }
+
+    private void refreshProfile() {
         new com.datezone.app.api.ApiClient(this).request(this, "GET", "users/me", null,
                 new com.datezone.app.api.ApiClient.Callback() {
                     @Override public void onSuccess(org.json.JSONObject response) throws Exception {
@@ -72,6 +75,7 @@ public class ProfileHomeActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         loadSavedProfileData();
+        refreshProfile();
     }
 
     private void loadSavedProfileData() {

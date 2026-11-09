@@ -4,7 +4,6 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/filters_background"
-    android:fitsSystemWindows="true"
     android:orientation="vertical">
     <LinearLayout
         android:id="@+id/editProfileHeader"
@@ -40,6 +39,13 @@
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="@color/border_input" />
+    <TextView
+        android:id="@+id/tvEditProfileStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:text="Đang tải hồ sơ…"
+        android:textColor="@color/text_secondary" />
     <androidx.core.widget.NestedScrollView
         android:id="@+id/editProfileScroll"
         android:layout_width="match_parent"

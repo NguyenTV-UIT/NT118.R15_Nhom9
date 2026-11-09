@@ -18,11 +18,13 @@ backend/
 │   ├── config/              # env.js (đọc .env), db.js (MySQL pool)
 │   ├── middlewares/         # auth (JWT), validate (zod), upload (multer), errorHandler
 │   ├── modules/
-│   │   ├── auth/            # đăng ký, đăng nhập, refresh token, đổi mật khẩu
+│   │   ├── auth/            # đăng ký / đăng nhập email, quên mật khẩu (OTP email), SĐT (tạm ngừng)
 │   │   ├── users/           # hồ sơ, tiêu chí, sở thích, ảnh
-│   │   └── home/            # feed gợi ý, search, swipe, match
-│   │       ├── matching.js  #   thuật toán chấm điểm matchScore
-│   │       └── taste.js     #   học gu từ lịch sử quẹt (cá nhân hoá)
+│   │   ├── home/            # feed gợi ý, search, swipe, match
+│   │   │   ├── matching.js  #   thuật toán chấm điểm matchScore
+│   │   │   └── taste.js     #   học gu từ lịch sử quẹt (cá nhân hoá)
+│   │   └── meta/            # danh mục lựa chọn (options.js: mã ↔ nhãn tiếng Việt)
+│   ├── services/            # otp.service.js (OTP), mail.js (gửi email), sms.js (gửi SMS)
 │   ├── utils/
 │   ├── app.js               # khai báo middleware + routes
 │   └── server.js            # khởi động HTTP server
@@ -50,7 +52,18 @@ npm run dev                   # chạy có auto-reload, mặc định http://loc
 
 Kiểm tra: mở `http://localhost:3000/api/health` → `"database": "up"`.
 
-Tài khoản demo (mật khẩu `123456`): `an@demo.local`, `binh@demo.local`, `chi@demo.local`, `dung@demo.local`, `giang@demo.local`, `hoa@demo.local`, `khoa@demo.local`, `admin@datingapp.local` (role admin).
+Tài khoản demo (mật khẩu `123456`), đăng nhập bằng email (cột SĐT dùng khi bật lại đăng nhập bằng SĐT):
+
+| Tên | Email | SĐT |
+|---|---|---|
+| An | `an@demo.local` | `0901000001` |
+| Bình | `binh@demo.local` | `0901000002` |
+| Chi | `chi@demo.local` | `0901000003` |
+| Dũng | `dung@demo.local` | `0901000004` |
+| Giang | `giang@demo.local` | `0901000005` |
+| Hoà | `hoa@demo.local` | `0901000006` |
+| Khoa | `khoa@demo.local` | `0901000007` |
+| Admin (role admin) | `admin@datingapp.local` | `0900000000` |
 
 > Android Emulator gọi máy host bằng `http://10.0.2.2:3000/api/`, điện thoại thật thì dùng IP LAN của máy chạy server.
 
@@ -76,18 +89,25 @@ Phía Android nên có class chung `BaseResponse<T>` với `success`, `message`,
 | Method | Endpoint | Auth | Mô tả |
 |---|---|---|---|
 | GET | `/api/health` | | Kiểm tra server + DB |
-| **Auth** | | | |
-| POST | `/api/auth/register` | | Bắt buộc: `{email, password, displayName, birthday: "YYYY-MM-DD", gender: male\|female\|other}` (≥ 18 tuổi). Không bắt buộc: `interestedIn, city, latitude, longitude, interestIds` → dùng làm kết quả Home mặc định |
-| POST | `/api/auth/login` | | `{email, password}` |
+| GET | `/api/meta/options` | | Danh mục lựa chọn (mã ↔ nhãn / nhãn ngắn tiếng Việt), 20 sở thích, giới hạn chiều cao / cân nặng... |
+| **Auth - email (app Android)** | | | Chi tiết ở phần [Nối API cho app Android](#nối-api-cho-app-android) |
+| POST | `/api/auth/register` | | **Chỉ** `{email, password}` (mật khẩu ≥ 8) → tạo tài khoản + hồ sơ trống + token |
+| POST | `/api/auth/login` | | `{email, password}` → token |
+| POST | `/api/auth/password/forgot` | | `{email}` → gửi / gửi lại OTP 6 số tới email |
+| POST | `/api/auth/password/verify-otp` | | `{email, otp}` → `resetToken` |
+| POST | `/api/auth/password/reset` | | `{resetToken, newPassword}` (≥ 8 ký tự, có chữ số) |
+| **Auth - số điện thoại** | | | **Tạm ngừng** → 403 `PHONE_AUTH_DISABLED` (bật lại: `PHONE_AUTH_ENABLED=true`) |
+| POST | `/api/auth/otp/send`, `/register/phone`, `/login/phone`, `/login/phone/verify`, `/otp/verify` | | Giữ code để bật lại sau |
 | POST | `/api/auth/refresh` | | `{refreshToken}` → token mới |
 | POST | `/api/auth/logout` | | `{refreshToken}` → thu hồi token |
 | PUT | `/api/auth/password` | ✔ | `{currentPassword, newPassword}` |
 | **User Profile** | | | |
 | GET | `/api/users/me` | ✔ | Hồ sơ đầy đủ của mình (kèm preferences, photos, interests) |
-| PUT | `/api/users/me/profile` | ✔ | Sửa `displayName, birthday, gender, bio, jobTitle, school, city, latitude, longitude` (gửi field nào sửa field đó) |
-| PUT | `/api/users/me/preferences` | ✔ | `{interestedIn: male\|female\|everyone, minAge, maxAge, maxDistanceKm}` |
+| PUT | `/api/users/me/profile` | ✔ | Gửi field nào sửa field đó: `displayName, birthday, gender, showGender, bio, jobTitle, school, city, latitude, longitude, heightCm, weightKg, relationshipGoal, zodiac, smoking, drinking, exercise, education` |
+| PUT | `/api/users/me/preferences` | ✔ | `{interestedIn: male\|female\|other\|everyone, minAge, maxAge, maxDistanceKm}` |
 | GET | `/api/users/interests` | ✔ | Danh sách sở thích để chọn |
-| PUT | `/api/users/me/interests` | ✔ | `{interestIds: [1,2,3]}` (tối đa 10) |
+| PUT | `/api/users/me/interests` | ✔ | `{interestNames: ["Du lịch", ...]}` hoặc `{interestIds: [1,2,3]}` (tối đa 20) |
+| POST | `/api/users/me/onboarding/complete` | ✔ | Hoàn tất hồ sơ (cần tên, ngày sinh, giới tính, ≥ 2 ảnh, ≥ 3 sở thích) |
 | POST | `/api/users/me/photos` | ✔ | multipart, field `photo` (jpg/png/webp, ≤ 5MB, tối đa 6 ảnh; ảnh đầu tiên là avatar) |
 | DELETE | `/api/users/me/photos/:photoId` | ✔ | Xoá ảnh |
 | GET | `/api/users/:id` | ✔ | Hồ sơ công khai của người khác (có `age`, `distanceKm`, không lộ email/ngày sinh/toạ độ) |
@@ -100,6 +120,91 @@ Phía Android nên có class chung `BaseResponse<T>` với `success`, `message`,
 | DELETE | `/api/home/matches/:matchId` | ✔ | Huỷ match |
 
 Ví dụ gọi thử từng API có trong `api.http` và `postman/DatingApp.postman_collection.json`.
+
+## Nối API cho app Android
+
+App đăng ký / đăng nhập bằng **email + mật khẩu**, sau đó đi qua các màn hình onboarding để tạo hồ sơ. Bảng dưới là API cho từng màn hình (theo code trong `android-app/`). Đăng ký / đăng nhập bằng số điện thoại đang **tạm ngừng**.
+
+### Đăng ký / đăng nhập / quên mật khẩu
+
+| Màn hình | Khi bấm nút | API |
+|---|---|---|
+| `RegisterActivity` | Đăng ký | `POST /auth/register` `{email, password}` → lưu token → `EnterNameActivity` (tên nhập ở màn Register thì gửi luôn ở bước EnterName, hoặc điền sẵn vào ô tên) |
+| `LoginActivity` | Đăng nhập | `POST /auth/login` `{email, password}` → lưu token. `user.onboarding.completed = false` thì đưa về màn onboarding còn thiếu, ngược lại vào Home |
+| `ForgotPasswordActivity` | Gửi mã | `POST /auth/password/forgot` `{email}` → màn OTP |
+| `OtpVerificationActivity` (FLOW_FORGOT_PASSWORD) | Xác nhận | `POST /auth/password/verify-otp` `{email, otp}` → truyền `resetToken` sang màn tiếp |
+| `OtpVerificationActivity` (FLOW_FORGOT_PASSWORD) | Gửi lại mã (sau 30 giây) | `POST /auth/password/forgot` `{email}` |
+| `ResetPasswordActivity` | Xác nhận | `POST /auth/password/reset` `{resetToken, newPassword}` → về Login |
+
+- **Đăng ký và đăng nhập không cần OTP** → app bỏ qua màn `OtpVerificationActivity` ở `FLOW_REGISTER` và `FLOW_LOGIN`, chỉ dùng màn OTP cho quên mật khẩu.
+- Đăng ký **chỉ nhận email + mật khẩu**; field khác gửi kèm sẽ bị bỏ qua. Hồ sơ được tạo trống ngay khi đăng ký, các thông tin (tên, ngày sinh, giới tính...) điền ở các màn onboarding bên dưới.
+- Email không phân biệt hoa thường (`Lan@Gmail.com` = `lan@gmail.com`).
+- OTP: 6 số, hết hạn sau 5 phút, gửi lại sau 30 giây, sai 5 lần phải gửi mã mới, tối đa 5 mã / email / giờ.
+- **Gửi email**: mặc định `MAIL_PROVIDER=console` → email in ra log server (`pm2 logs dating-api`), mã OTP trả trong field `devOtp` (khi `OTP_DEV_MODE=true`) để test. Gửi thật bằng Gmail: xem `src/services/mail.js` (cần App Password), rồi tắt `OTP_DEV_MODE`.
+
+Mã lỗi (field `code` trong response lỗi) để app hiện thông báo phù hợp:
+
+| code | HTTP | Ý nghĩa |
+|---|---|---|
+| `CONFLICT` | 409 | Email đã được sử dụng (đăng ký) |
+| `UNAUTHORIZED` | 401 | Sai email hoặc mật khẩu |
+| `NOT_FOUND` | 404 | Email chưa đăng ký (quên mật khẩu) |
+| `OTP_WRONG` | 400 | Sai mã, `message` có số lần thử còn lại |
+| `OTP_EXPIRED` | 400 | Mã hết hạn |
+| `OTP_LOCKED` / `OTP_INVALID` | 400 | Sai quá 5 lần / mã đã dùng → bấm gửi lại |
+| `OTP_TOO_SOON` | 429 | Chưa đủ 30 giây để gửi lại |
+| `OTP_LIMIT` | 429 | Quá 5 mã trong 1 giờ |
+| `PHONE_AUTH_DISABLED` | 403 | Gọi API số điện thoại khi đang tạm ngừng |
+
+### Onboarding (sau khi đăng ký)
+
+Sau khi đăng ký, hồ sơ được **khởi tạo trống**. Mỗi màn hình gọi API ngay khi bấm "Tiếp tục" (không cần chuyền dữ liệu qua `Intent` tới màn cuối). Các lựa chọn gửi **nhãn tiếng Việt đúng như trên nút** (của bất kỳ màn nào) hoặc **mã** đều được, server luôn lưu và trả về mã.
+
+| Màn hình | API | Body ví dụ |
+|---|---|---|
+| `EnterNameActivity` | `PUT /users/me/profile` | `{"displayName": "Lan"}` |
+| `AddPhotosActivity` | `POST /users/me/photos` (mỗi ảnh 1 lần, multipart field `photo`) | ảnh đầu tiên = avatar, tối thiểu 2, tối đa 6 |
+| `BirthdayActivity` | `PUT /users/me/profile` | `{"birthday": "12/03/2004"}` (hoặc `2004-03-12`) |
+| `GenderActivity` | `PUT /users/me/profile` | `{"gender": "Nữ", "showGender": true}` |
+| `DatingPreferenceActivity` | `PUT /users/me/preferences` | `{"interestedIn": "Nam"}` |
+| `LocationDistanceActivity` | `PUT /users/me/profile` + `PUT /users/me/preferences` | `{"city": "TP. Hồ Chí Minh", "latitude": 10.87, "longitude": 106.80}` + `{"maxDistanceKm": 25}` |
+| `HeightActivity` | `PUT /users/me/profile` | `{"heightCm": 160}` (140–200) |
+| `WeightActivity` | `PUT /users/me/profile` | `{"weightKg": 48}` (35–120, **không** hiện cho người khác) |
+| `InterestsActivity` | `PUT /users/me/interests` | `{"interestNames": ["Du lịch", "Cà phê", "Nhiếp ảnh"]}` (≥ 3) |
+| `RelationshipGoalActivity` | `PUT /users/me/profile` | `{"relationshipGoal": "Hẹn hò và tìm hiểu"}` |
+| `ZodiacActivity` | `PUT /users/me/profile` | `{"zodiac": "Song Ngư"}` |
+| `SmokingActivity` | `PUT /users/me/profile` | `{"smoking": "Không hút thuốc"}` |
+| `DrinkingActivity` | `PUT /users/me/profile` | `{"drinking": "Thỉnh thoảng uống"}` |
+| `ExerciseActivity` | `PUT /users/me/profile` | `{"exercise": "Thỉnh thoảng tập luyện"}` |
+| `EducationActivity` | `PUT /users/me/profile` | `{"education": "Đang học đại học"}` |
+| `BioActivity` | `PUT /users/me/profile` | `{"bio": "..."}` (≤ 300 ký tự) |
+| `ProfileReadyActivity` | `POST /users/me/onboarding/complete` | thiếu gì → 400 `PROFILE_INCOMPLETE`, `errors` liệt kê field còn thiếu |
+
+### Nhãn lựa chọn (theo frontend)
+
+App dùng **2 bộ nhãn** cho cùng một lựa chọn; server nhận cả hai:
+
+| Mục | Màn Onboarding / Bộ lọc / Xem hồ sơ (`label`) | Màn Sửa hồ sơ / Xem trước (`shortLabel`) | Mã lưu DB |
+|---|---|---|---|
+| Hút thuốc | Không hút thuốc · Thỉnh thoảng hút thuốc · Hút thuốc thường xuyên | Không bao giờ · Thỉnh thoảng · Thường xuyên · **Đang cai** | `never` · `sometimes` · `regularly` · `quitting` |
+| Rượu bia | Không uống · Thỉnh thoảng uống · Uống khá thường xuyên | Không bao giờ · Thỉnh thoảng · Thường xuyên · **Cuối tuần** | `never` · `sometimes` · `often` · `weekends` |
+| Tập luyện | Tập luyện thường xuyên · Thỉnh thoảng tập luyện · Không tập luyện | **Mỗi ngày** · Thường xuyên · Thỉnh thoảng · Không tập | `daily` · `very_active` · `sometimes` · `never` |
+| Học vấn | Tốt nghiệp THPT · Đại học · Sau đại học / Thạc sĩ · Tiến sĩ | Trung học · Đại học · Thạc sĩ · Tiến sĩ · **Khác** | `high_school` · `bachelor` · `postgraduate` · `phd` · `other` |
+| Mục tiêu | Tìm hiểu để tiến tới mối quan hệ lâu dài · Hẹn hò và tìm hiểu · Kết hôn · Kết bạn · Chưa xác định... | Người yêu lâu dài · Bạn hẹn hò · Bạn đời · Bạn bè mới · Chưa rõ | `long_term` · `dating` · `marriage` · `friendship` · `not_sure` |
+
+(Bảng chỉ liệt kê các lựa chọn có ở cả hai màn; **in đậm** là lựa chọn chỉ có ở màn Sửa hồ sơ.) Server luôn trả về **mã**; app hiển thị bằng `label` hoặc `shortLabel` lấy từ `GET /meta/options` (mỗi lựa chọn có `{ code, label, shortLabel }`). Thêm / sửa lựa chọn: chỉ sửa `src/modules/meta/options.js`.
+
+- Nút "Bỏ qua" ở các màn không bắt buộc (cân nặng, cung hoàng đạo, hút thuốc, uống rượu, tập luyện, học vấn) → không gọi API.
+- `GET /users/me` trả `onboarding: { completed, missing: [...] }` → sau khi đăng nhập app biết còn thiếu bước nào.
+- Hồ sơ **chưa hoàn tất** thì không hiện trên Home của người khác, và tự xem Home sẽ bị 403 `PROFILE_INCOMPLETE`.
+- Hồ sơ công khai (`/home/feed`, `/users/:id`) **không** có SĐT, email, ngày sinh, cân nặng; giới tính bị ẩn nếu `showGender = false`. (Thẻ trên app đang hiện cân nặng - nhóm chưa chốt, tạm giữ ẩn.)
+
+### Gọi API từ Android (Retrofit)
+
+- Base URL: `http://<IP-VPS>/api/` (thêm `android:usesCleartextTraffic="true"` và quyền `INTERNET` trong `AndroidManifest.xml`).
+- Header: `Authorization: Bearer <accessToken>` cho mọi API có ✔.
+- Access token hết hạn sau 15 phút → nhận 401 thì gọi `POST /auth/refresh` với `refreshToken`.
+- Response chung: `{ success, message, data, meta? }`; lỗi: `{ success: false, message, code, errors? }` → hiện `message` cho người dùng.
 
 ## Trang Home: kết quả mặc định & filter
 
@@ -228,8 +333,10 @@ Sơ đồ bảng (xem chi tiết trong `database/schema.sql`):
 - `blocks`, `reports` — an toàn & kiểm duyệt (Web Admin)
 - `notifications`, `device_tokens` — thông báo, FCM push
 - `user_taste` — gu đã học từ lịch sử quẹt (gợi ý cá nhân hoá)
+- `otp_codes` — mã OTP gửi qua email / SMS (lưu dạng băm)
+- `schema_migrations` — migration đã chạy
 
-Thay đổi schema sau khi đã có dữ liệu: thêm file `database/migrations/NNN_ten.sql` (viết dạng idempotent, VD `CREATE TABLE IF NOT EXISTS`) rồi chạy `npm run db:migrate`. Không xoá dữ liệu, `deploy.sh` tự chạy lệnh này mỗi lần deploy.
+Thay đổi schema sau khi đã có dữ liệu: thêm file mới `database/migrations/NNN_ten.sql` (không sửa file đã chạy), sửa luôn `schema.sql` cho giống, rồi chạy `npm run db:migrate`. Mỗi migration chỉ chạy 1 lần (ghi vào bảng `schema_migrations`), không xoá dữ liệu; `deploy.sh` tự chạy lệnh này mỗi lần deploy.
 
 Đã tạo sẵn bảng cho các phần sau để không phải đổi schema giữa chừng; API của chúng sẽ thêm ở 3 tuần hoàn thiện.
 

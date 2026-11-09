@@ -1,4 +1,5 @@
 const { z } = require('zod');
+const { option } = require('../../utils/validators');
 
 const feedQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -21,7 +22,7 @@ const optionalTrimmed = (max) =>
 
 const searchQuery = z
   .object({
-    gender: z.enum(['male', 'female', 'everyone']).optional(),
+    gender: option('interestedIn').optional(), // male | female | other | everyone (hoặc nhãn tiếng Việt)
     minAge: z.coerce.number().int().min(18).max(100).optional(),
     maxAge: z.coerce.number().int().min(18).max(100).optional(),
     maxDistanceKm: z.coerce.number().int().min(1).max(500).optional(),

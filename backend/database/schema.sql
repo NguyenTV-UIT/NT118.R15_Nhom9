@@ -7,6 +7,8 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS schema_migrations;
+DROP TABLE IF EXISTS otp_codes;
 DROP TABLE IF EXISTS user_taste;
 DROP TABLE IF EXISTS device_tokens;
 DROP TABLE IF EXISTS notifications;
@@ -28,16 +30,33 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- ---------------------------------------------------------------------
 -- 1. USER & AUTH
 -- ---------------------------------------------------------------------
+-- Đăng nhập bằng email (số điện thoại: đang tạm ngừng, giữ cột để bật lại sau)
 CREATE TABLE users (
-  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  email           VARCHAR(255)  NOT NULL,
+  id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email              VARCHAR(255)  NULL,
+  phone              VARCHAR(20)   NULL,              -- dạng +84xxxxxxxxx
+  phone_verified_at  DATETIME      NULL,
   password_hash   VARCHAR(255)  NOT NULL,
   role            ENUM('user','admin')             NOT NULL DEFAULT 'user',
   status          ENUM('active','banned','deleted') NOT NULL DEFAULT 'active',
   last_active_at  DATETIME      NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_users_email (email)
+  UNIQUE KEY uq_users_email (email),
+  UNIQUE KEY uq_users_phone (phone)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Mã OTP gửi qua email hoặc SMS (quên mật khẩu; đăng ký / đăng nhập bằng SĐT khi bật lại)
+CREATE TABLE otp_codes (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  target       VARCHAR(255)    NOT NULL,           -- email hoặc SĐT +84...
+  purpose      ENUM('register','login','reset_password') NOT NULL,
+  code_hash    CHAR(64)        NOT NULL,           -- SHA-256(target:purpose:code)
+  attempts     TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  expires_at   DATETIME        NOT NULL,
+  consumed_at  DATETIME        NULL,
+  created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_otp_target (target, purpose, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE refresh_tokens (
@@ -55,18 +74,31 @@ CREATE TABLE refresh_tokens (
 -- ---------------------------------------------------------------------
 -- 2. PROFILE
 -- ---------------------------------------------------------------------
+-- Đăng ký chỉ cần email + mật khẩu -> hồ sơ tạo trống, tên / ngày sinh / giới tính... điền dần qua onboarding.
+-- completed_at: thời điểm hoàn tất hồ sơ; chỉ hồ sơ đã hoàn tất mới hiện trên trang Home.
+-- Các cột lựa chọn (relationship_goal, zodiac, ...) lưu mã tiếng Anh, danh sách mã: GET /api/meta/options
 CREATE TABLE profiles (
-  user_id       BIGINT UNSIGNED PRIMARY KEY,
-  display_name  VARCHAR(100)  NOT NULL,
-  birthday      DATE          NOT NULL,
-  gender        ENUM('male','female','other') NOT NULL,
-  bio           VARCHAR(500)  NULL,
-  job_title     VARCHAR(100)  NULL,
-  school        VARCHAR(150)  NULL,
-  city          VARCHAR(100)  NULL,
-  latitude      DECIMAL(9,6)  NULL,
-  longitude     DECIMAL(9,6)  NULL,
-  updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  user_id            BIGINT UNSIGNED PRIMARY KEY,
+  display_name       VARCHAR(100)  NULL,                   -- điền ở màn EnterName sau khi đăng ký
+  birthday           DATE          NULL,
+  gender             ENUM('male','female','other') NULL,   -- other = phi nhị nguyên
+  show_gender        TINYINT(1)    NOT NULL DEFAULT 1,
+  bio                VARCHAR(500)  NULL,
+  job_title          VARCHAR(100)  NULL,
+  school             VARCHAR(150)  NULL,
+  city               VARCHAR(100)  NULL,
+  latitude           DECIMAL(9,6)  NULL,
+  longitude          DECIMAL(9,6)  NULL,
+  height_cm          SMALLINT UNSIGNED NULL,
+  weight_kg          SMALLINT UNSIGNED NULL,
+  relationship_goal  VARCHAR(32)   NULL,
+  zodiac             VARCHAR(16)   NULL,
+  smoking            VARCHAR(32)   NULL,
+  drinking           VARCHAR(32)   NULL,
+  exercise           VARCHAR(32)   NULL,
+  education          VARCHAR(32)   NULL,
+  completed_at       DATETIME      NULL,
+  updated_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_profiles_gender_birthday (gender, birthday),
   CONSTRAINT fk_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -74,7 +106,7 @@ CREATE TABLE profiles (
 -- Tiêu chí tìm kiếm của người dùng (dùng cho trang Home)
 CREATE TABLE preferences (
   user_id          BIGINT UNSIGNED PRIMARY KEY,
-  interested_in    ENUM('male','female','everyone') NOT NULL DEFAULT 'everyone',
+  interested_in    ENUM('male','female','other','everyone') NOT NULL DEFAULT 'everyone',
   min_age          TINYINT UNSIGNED NOT NULL DEFAULT 18,
   max_age          TINYINT UNSIGNED NOT NULL DEFAULT 35,
   max_distance_km  SMALLINT UNSIGNED NOT NULL DEFAULT 50,
@@ -214,4 +246,12 @@ CREATE TABLE user_taste (
   weights          JSON          NULL,                -- trọng số cá nhân {"interests":..,"distance":..,"age":..}
   updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_taste_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- 8. MIGRATION ĐÃ CHẠY (db-init tự đánh dấu, db-migrate dùng để bỏ qua)
+-- ---------------------------------------------------------------------
+CREATE TABLE schema_migrations (
+  name        VARCHAR(255) PRIMARY KEY,
+  applied_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

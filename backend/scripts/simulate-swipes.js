@@ -18,6 +18,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../src/config/db');
 const home = require('../src/modules/home/home.service');
 const taste = require('../src/modules/home/taste');
+const { APP_INTERESTS } = require('../src/modules/meta/options');
 
 const SIM_USERS = 100;
 const SWIPES_PER_USER = 40;
@@ -66,8 +67,8 @@ async function ensureSimUsers(interestIds) {
       ]);
       const id = res.insertId;
       await conn.query(
-        `INSERT INTO profiles (user_id, display_name, birthday, gender, bio, city, latitude, longitude)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO profiles (user_id, display_name, birthday, gender, bio, city, latitude, longitude, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
         [id, name, birthdayForAge(age), female ? 'female' : 'male', rnd() < 0.7 ? 'Người dùng giả lập' : null, 'TP.HCM', lat.toFixed(6), lng.toFixed(6)],
       );
       await conn.query('INSERT INTO preferences (user_id, interested_in) VALUES (?, ?)', [id, rnd() < 0.6 ? 'male' : 'everyone']);
@@ -162,7 +163,8 @@ async function clean() {
 async function main() {
   if (process.argv.includes('--clean')) return clean();
 
-  const interests = await db.query('SELECT id, name FROM interests');
+  // Chỉ dùng 20 sở thích có trên app
+  const interests = (await db.query('SELECT id, name FROM interests')).filter((r) => APP_INTERESTS.includes(r.name));
   if (!interests.length) throw new Error('Chưa có sở thích - hãy chạy npm run db:seed trước');
   await ensureSimUsers(interests.map((r) => Number(r.id)));
 

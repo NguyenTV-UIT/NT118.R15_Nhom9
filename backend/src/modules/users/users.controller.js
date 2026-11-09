@@ -19,7 +19,7 @@ exports.listInterests = async (req, res) => {
 };
 
 exports.setInterests = async (req, res) => {
-  ok(res, await usersService.setInterests(req.user.id, req.body.interestIds), 'Cập nhật sở thích thành công');
+  ok(res, await usersService.setInterests(req.user.id, req.body), 'Cập nhật sở thích thành công');
 };
 
 exports.addPhoto = async (req, res) => {
@@ -34,4 +34,8 @@ exports.deletePhoto = async (req, res) => {
 
 exports.getById = async (req, res) => {
   ok(res, await usersService.getPublicProfile(req.user.id, req.params.id));
+};
+
+exports.completeOnboarding = async (req, res) => {
+  ok(res, await usersService.completeOnboarding(req.user.id), 'Hồ sơ đã sẵn sàng!');
 };

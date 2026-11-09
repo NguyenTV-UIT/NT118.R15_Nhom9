@@ -12,6 +12,7 @@ const { ok } = require('./utils/response');
 const authRoutes = require('./modules/auth/auth.routes');
 const userRoutes = require('./modules/users/users.routes');
 const homeRoutes = require('./modules/home/home.routes');
+const metaRoutes = require('./modules/meta/meta.routes');
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.get('/api/health', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/home', homeRoutes);
+app.use('/api/meta', metaRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -18,13 +18,22 @@ const MAX_WIDEN_KM = 500;
 /** Thông tin người xem: giới tính, vị trí, tuổi, sở thích, tiêu chí đã lưu. */
 async function loadViewer(userId) {
   const [row] = await db.query(
-    `SELECT p.gender, p.birthday, p.latitude, p.longitude,
+    `SELECT p.gender, p.birthday, p.latitude, p.longitude, p.completed_at,
             pr.interested_in, pr.min_age, pr.max_age, pr.max_distance_km
        FROM profiles p LEFT JOIN preferences pr ON pr.user_id = p.user_id
       WHERE p.user_id = ?`,
     [userId],
   );
   if (!row) throw ApiError.notFound('Không tìm thấy hồ sơ');
+  // Chưa hoàn tất onboarding (chưa có ngày sinh / giới tính / ảnh...) thì chưa xem được trang Home
+  if (!row.completed_at) {
+    throw new ApiError(
+      403,
+      'Bạn cần hoàn tất hồ sơ trước khi xem gợi ý',
+      'PROFILE_INCOMPLETE',
+      [{ field: 'onboarding', message: 'Gọi GET /api/users/me để xem còn thiếu gì, sau đó POST /api/users/me/onboarding/complete' }],
+    );
+  }
   const interestIds = (await db.query('SELECT interest_id FROM user_interests WHERE user_id = ?', [userId])).map(
     (r) => Number(r.interest_id),
   );
@@ -65,6 +74,7 @@ async function findCandidates(viewer, f, userTaste = null) {
   const where = [
     'u.id <> ?',
     "u.status = 'active'",
+    'p.completed_at IS NOT NULL', // chỉ hiện người đã hoàn tất hồ sơ
     // ứng viên cũng phải muốn tìm giới tính của mình
     "(cp.interested_in IS NULL OR cp.interested_in = 'everyone' OR cp.interested_in = ?)",
     'TIMESTAMPDIFF(YEAR, p.birthday, UTC_DATE()) BETWEEN ? AND ?',
@@ -106,7 +116,7 @@ async function findCandidates(viewer, f, userTaste = null) {
 
   const rows = await db.query(
     `SELECT u.id, u.last_active_at, u.created_at,
-            p.display_name, p.birthday, p.gender, p.bio, p.job_title, p.school, p.city,
+            ${usersService.PUBLIC_PROFILE_COLUMNS},
             ${distanceExpr} AS distance_km,
             ${commonExpr} AS common_interests,
             (SELECT GROUP_CONCAT(ui2.interest_id) FROM user_interests ui2 WHERE ui2.user_id = u.id) AS interest_ids,
@@ -306,7 +316,11 @@ async function getTasteSummary(userId) {
 async function swipe(userId, targetId, action) {
   if (userId === targetId) throw ApiError.badRequest('Không thể tự quẹt chính mình');
 
-  const [target] = await db.query("SELECT id FROM users WHERE id = ? AND status = 'active'", [targetId]);
+  const [target] = await db.query(
+    `SELECT u.id FROM users u JOIN profiles p ON p.user_id = u.id
+      WHERE u.id = ? AND u.status = 'active' AND p.completed_at IS NOT NULL`,
+    [targetId],
+  );
   if (!target) throw ApiError.notFound('Không tìm thấy người dùng');
   if (await usersService.isBlockedBetween(userId, targetId)) throw ApiError.notFound('Không tìm thấy người dùng');
 
@@ -371,7 +385,7 @@ async function swipe(userId, targetId, action) {
 async function getMatches(userId) {
   const rows = await db.query(
     `SELECT m.id AS match_id, m.created_at AS matched_at,
-            u.id, p.display_name, p.birthday, p.gender, p.bio, p.job_title, p.school, p.city,
+            u.id, ${usersService.PUBLIC_PROFILE_COLUMNS},
             NULL AS distance_km,
             lm.content AS last_message, lm.type AS last_message_type,
             lm.sender_id AS last_sender_id, lm.created_at AS last_message_at

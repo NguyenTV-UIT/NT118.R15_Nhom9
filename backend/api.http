@@ -7,17 +7,11 @@
 ### Health check
 GET {{baseUrl}}/health
 
-### Đăng ký
+### Đăng ký (chỉ email + mật khẩu ≥ 8 ký tự, hồ sơ điền sau)
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
-{
-  "email": "test@demo.local",
-  "password": "123456",
-  "displayName": "Test",
-  "birthday": "2004-06-01",
-  "gender": "male"
-}
+{ "email": "test@demo.local", "password": "matkhau123" }
 
 ### Đăng nhập (tài khoản seed)
 POST {{baseUrl}}/auth/login
@@ -92,4 +86,52 @@ Authorization: Bearer {{token}}
 
 ### Gu đã học từ lịch sử quẹt (cá nhân hoá)
 GET {{baseUrl}}/home/taste
+Authorization: Bearer {{token}}
+
+### ===== App Android: email =====
+
+### Danh mục lựa chọn (không cần token)
+GET {{baseUrl}}/meta/options
+
+### Quên mật khẩu: gửi OTP tới email (mã nằm ở data.devOtp hoặc trong pm2 logs)
+POST {{baseUrl}}/auth/password/forgot
+Content-Type: application/json
+
+{ "email": "test@demo.local" }
+
+### Quên mật khẩu: xác thực OTP -> resetToken
+POST {{baseUrl}}/auth/password/verify-otp
+Content-Type: application/json
+
+{ "email": "test@demo.local", "otp": "123456" }
+
+### Đặt mật khẩu mới (≥ 8 ký tự, có chữ số)
+POST {{baseUrl}}/auth/password/reset
+Content-Type: application/json
+
+{ "resetToken": "PASTE_RESET_TOKEN", "newPassword": "matkhaumoi1" }
+
+### Sửa hồ sơ: nhãn ngắn của màn ProfileEdit
+PUT {{baseUrl}}/users/me/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "smoking": "Đang cai", "drinking": "Cuối tuần", "exercise": "Mỗi ngày", "education": "Thạc sĩ", "relationshipGoal": "Bạn đời" }
+
+### Onboarding: gửi nhãn tiếng Việt như trên app
+PUT {{baseUrl}}/users/me/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "birthday": "12/03/2004", "gender": "Nữ", "heightCm": 160, "smoking": "Không hút thuốc", "zodiac": "Song Ngư" }
+
+### Onboarding: sở thích theo tên
+PUT {{baseUrl}}/users/me/interests
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "interestNames": ["Du lịch", "Cà phê", "Nhiếp ảnh"] }
+
+### Onboarding: hoàn tất hồ sơ
+POST {{baseUrl}}/users/me/onboarding/complete
 Authorization: Bearer {{token}}

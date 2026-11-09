@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const env = require('../src/config/env');
+const { markAllApplied } = require('./db-migrate');
 
 async function main() {
   const conn = await mysql.createConnection({
@@ -25,6 +26,8 @@ async function main() {
 
   const sql = fs.readFileSync(path.join(__dirname, '..', 'database', 'schema.sql'), 'utf8');
   await conn.query(sql);
+  // schema.sql đã là bản mới nhất -> đánh dấu mọi migration là đã chạy
+  await markAllApplied(conn);
   await conn.end();
   console.log(`[db:init] Đã tạo schema cho database "${env.db.database}"`);
 }

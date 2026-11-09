@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.RadioButton;
@@ -73,6 +75,6 @@ public class RelationshipGoalActivity extends AppCompatActivity {
         // Chuyển sang lg11_activity_zodiac
         android.content.Intent intent = new android.content.Intent(RelationshipGoalActivity.this, ZodiacActivity.class);
         intent.putExtra("EXTRA_RELATIONSHIP_GOAL", selectedGoal);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("relationshipGoal", selectedGoal), intent);
     }
 }

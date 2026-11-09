@@ -20,6 +20,15 @@ import com.google.android.material.card.MaterialCardView;
 public class PhotoViewerActivity extends AppCompatActivity {
 
     public static final String EXTRA_PHOTOS = "EXTRA_PHOTOS";
+    public static final String EXTRA_PHOTO_URLS = "photoUrls";
+    private String[] photoUrls;
+
+    private int photoCount() { return photoUrls == null ? photoResIds.length : photoUrls.length; }
+
+    private void showPhoto(ImageView view, int index) {
+        if (photoUrls == null) view.setImageResource(photoResIds[index]);
+        else com.datezone.app.api.RemoteImages.load(view, photoUrls[index]);
+    }
 
     private ImageView ivMainPhoto;
     private LinearLayout layoutThumbnails;
@@ -70,6 +79,10 @@ public class PhotoViewerActivity extends AppCompatActivity {
         }
 
         Intent intent = getIntent();
+        if (intent != null && intent.hasExtra(EXTRA_PHOTO_URLS)) {
+            photoUrls = intent.getStringArrayExtra(EXTRA_PHOTO_URLS);
+            if (photoUrls == null) photoUrls = new String[0];
+        }
         if (intent != null && intent.hasExtra(EXTRA_PHOTOS)) {
             int[] customPhotos = intent.getIntArrayExtra(EXTRA_PHOTOS);
             if (customPhotos != null && customPhotos.length > 0) {
@@ -107,7 +120,7 @@ public class PhotoViewerActivity extends AppCompatActivity {
                             }
                         } else {
                             // Quẹt sang trái -> Xem ảnh tiếp theo
-                            if (currentPhotoIndex < photoResIds.length - 1) {
+                            if (currentPhotoIndex < photoCount() - 1) {
                                 currentPhotoIndex++;
                                 renderMainPhotoAndThumbnails();
                             }
@@ -129,7 +142,7 @@ public class PhotoViewerActivity extends AppCompatActivity {
                                 renderMainPhotoAndThumbnails();
                             }
                         } else if (e.getX() > (viewWidth * 2f / 3f)) {
-                            if (currentPhotoIndex < photoResIds.length - 1) {
+                            if (currentPhotoIndex < photoCount() - 1) {
                                 currentPhotoIndex++;
                                 renderMainPhotoAndThumbnails();
                             }
@@ -150,25 +163,28 @@ public class PhotoViewerActivity extends AppCompatActivity {
     }
 
     private void renderMainPhotoAndThumbnails() {
-        if (photoResIds.length == 0) return;
+        if (photoCount() == 0) {
+            ivMainPhoto.setImageResource(R.drawable.discovery_profile_placeholder);
+            return;
+        }
 
         if (currentPhotoIndex < 0) currentPhotoIndex = 0;
-        if (currentPhotoIndex >= photoResIds.length) currentPhotoIndex = photoResIds.length - 1;
+        if (currentPhotoIndex >= photoCount()) currentPhotoIndex = photoCount() - 1;
 
         // Hiển thị ảnh chính
-        ivMainPhoto.setImageResource(photoResIds[currentPhotoIndex]);
+        showPhoto(ivMainPhoto, currentPhotoIndex);
 
         // Cập nhật danh sách thumbnail
         if (layoutThumbnails != null) {
             layoutThumbnails.removeAllViews();
-            int densityDp = (int) getResources().getDisplayMetrics().density;
-            int cardSizePx = 56 * densityDp;
-            int marginEndPx = 10 * densityDp;
+            float densityDp = getResources().getDisplayMetrics().density;
+            int cardSizePx = (int) (56 * densityDp);
+            int marginEndPx = (int) (10 * densityDp);
 
             int activeBorderColor = ContextCompat.getColor(this, R.color.brand_primary);
             int inactiveBorderColor = ContextCompat.getColor(this, R.color.border_input);
 
-            for (int i = 0; i < photoResIds.length; i++) {
+            for (int i = 0; i < photoCount(); i++) {
                 final int index = i;
 
                 MaterialCardView cardView = new MaterialCardView(this);
@@ -180,7 +196,7 @@ public class PhotoViewerActivity extends AppCompatActivity {
 
                 if (i == currentPhotoIndex) {
                     cardView.setStrokeColor(activeBorderColor);
-                    cardView.setStrokeWidth(2 * densityDp);
+                    cardView.setStrokeWidth((int) (2 * densityDp));
                     cardView.setAlpha(1.0f);
                 } else {
                     cardView.setStrokeColor(inactiveBorderColor);
@@ -194,7 +210,7 @@ public class PhotoViewerActivity extends AppCompatActivity {
                         LinearLayout.LayoutParams.MATCH_PARENT
                 ));
                 ivThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                ivThumb.setImageResource(photoResIds[i]);
+                showPhoto(ivThumb, i);
 
                 cardView.addView(ivThumb);
                 cardView.setOnClickListener(v -> {

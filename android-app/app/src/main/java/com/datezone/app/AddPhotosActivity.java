@@ -17,7 +17,8 @@ import androidx.core.view.WindowInsetsCompat;
 public class AddPhotosActivity extends AppCompatActivity {
 
     private final View[] photoSlots = new View[6];
-    private final Uri[] photoUris = new Uri[6];
+    private final long[] photoIds = new long[6];
+    private boolean processing;
     private int currentSelectingIndex = -1;
 
     private ActivityResultLauncher<String> photoPickerLauncher;
@@ -62,7 +63,7 @@ public class AddPhotosActivity extends AppCompatActivity {
                 new ActivityResultContracts.GetContent(),
                 uri -> {
                     if (uri != null && currentSelectingIndex >= 0 && currentSelectingIndex < 6) {
-                        setPhotoToSlot(currentSelectingIndex, uri);
+                        uploadPhotoToSlot(currentSelectingIndex, uri);
                     }
                 }
         );
@@ -88,6 +89,11 @@ public class AddPhotosActivity extends AppCompatActivity {
             if (photoSlots[i] != null) {
                 // Click vào slot -> Mở thư viện ảnh
                 photoSlots[i].setOnClickListener(v -> {
+                    if (processing) return;
+                    if (photoIds[index] != 0) {
+                        Toast.makeText(this, "Nhấn nút xóa trên ảnh trước khi chọn ảnh thay thế.", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     currentSelectingIndex = index;
                     photoPickerLauncher.launch("image/*");
                 });
@@ -105,10 +111,11 @@ public class AddPhotosActivity extends AppCompatActivity {
 
         // Nút Tiếp tục dùng chung
         findViewById(R.id.btnContinue).setOnClickListener(v -> checkAndContinue());
+        loadRemotePhotos();
     }
 
-    private void setPhotoToSlot(int index, Uri uri) {
-        photoUris[index] = uri;
+    private void showRemotePhoto(int index, org.json.JSONObject photo) throws Exception {
+        photoIds[index] = photo.getLong("id");
         View slot = photoSlots[index];
         if (slot == null) return;
 
@@ -117,7 +124,7 @@ public class AddPhotosActivity extends AppCompatActivity {
         View btnRemovePhoto = slot.findViewById(R.id.btnRemovePhoto);
 
         if (ivPhoto != null) {
-            ivPhoto.setImageURI(uri);
+            com.datezone.app.api.RemoteImages.load(ivPhoto, photo.getString("url"));
             ivPhoto.setVisibility(View.VISIBLE);
         }
         if (layoutPlaceholder != null) {
@@ -128,8 +135,8 @@ public class AddPhotosActivity extends AppCompatActivity {
         }
     }
 
-    private void removePhotoFromSlot(int index) {
-        photoUris[index] = null;
+    private void clearPhotoSlot(int index) {
+        photoIds[index] = 0;
         View slot = photoSlots[index];
         if (slot == null) return;
 
@@ -149,10 +156,73 @@ public class AddPhotosActivity extends AppCompatActivity {
         }
     }
 
+    private void setProcessing(boolean value) {
+        processing = value;
+        findViewById(R.id.btnContinue).setEnabled(!value);
+        ((android.widget.TextView) findViewById(R.id.btnContinue)).setText(value ? "Đang xử lý…" : "Tiếp tục");
+    }
+
+    private void loadRemotePhotos() {
+        setProcessing(true);
+        new com.datezone.app.api.ApiClient(this).request(this, "GET", "users/me", null,
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                        org.json.JSONObject user = response.getJSONObject("data");
+                        new com.datezone.app.api.SessionStore(AddPhotosActivity.this).saveUser(user);
+                        org.json.JSONArray photos = user.getJSONArray("photos");
+                        for (int i = 0; i < photos.length() && i < 6; i++) showRemotePhoto(i, photos.getJSONObject(i));
+                        setProcessing(false);
+                    }
+                    @Override public void onError(String message) {
+                        // Do not allow uploads until we know how many photos already exist.
+                        Toast.makeText(AddPhotosActivity.this, message, Toast.LENGTH_LONG).show();
+                        findViewById(R.id.btnContinue).setEnabled(true);
+                        ((android.widget.TextView) findViewById(R.id.btnContinue)).setText("Thử tải lại");
+                        findViewById(R.id.btnContinue).setOnClickListener(v -> {
+                            findViewById(R.id.btnContinue).setOnClickListener(next -> checkAndContinue());
+                            loadRemotePhotos();
+                        });
+                    }
+                });
+    }
+
+    private void uploadPhotoToSlot(int index, Uri uri) {
+        if (processing || photoIds[index] != 0) return;
+        setProcessing(true);
+        new com.datezone.app.api.ApiClient(this).uploadPhoto(this, uri,
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                        showRemotePhoto(index, response.getJSONObject("data"));
+                        setProcessing(false);
+                    }
+                    @Override public void onError(String message) {
+                        setProcessing(false);
+                        Toast.makeText(AddPhotosActivity.this, message, Toast.LENGTH_LONG).show();
+                    }
+                });
+    }
+
+    private void removePhotoFromSlot(int index) {
+        if (processing || photoIds[index] == 0) return;
+        setProcessing(true);
+        new com.datezone.app.api.ApiClient(this).request(this, "DELETE", "users/me/photos/" + photoIds[index], null,
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) {
+                        clearPhotoSlot(index);
+                        setProcessing(false);
+                    }
+                    @Override public void onError(String message) {
+                        setProcessing(false);
+                        Toast.makeText(AddPhotosActivity.this, message, Toast.LENGTH_LONG).show();
+                    }
+                });
+    }
+
     private void checkAndContinue() {
         int uploadedCount = 0;
-        for (Uri uri : photoUris) {
-            if (uri != null) {
+        if (processing) return;
+        for (long id : photoIds) {
+            if (id != 0) {
                 uploadedCount++;
             }
         }

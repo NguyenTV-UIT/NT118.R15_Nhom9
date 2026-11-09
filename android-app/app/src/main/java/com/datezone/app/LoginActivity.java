@@ -89,10 +89,8 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
 
-        // Chuyển sang xác thực OTP cho luồng đăng nhập
-        Intent intent = new Intent(LoginActivity.this, OtpVerificationActivity.class);
-        intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_LOGIN);
-        intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, email);
-        startActivity(intent);
+        com.datezone.app.api.ApiUi.send(this, R.id.btnLogin, false, "POST", "auth/login",
+                com.datezone.app.api.ApiUi.data("email", email, "password", password),
+                response -> com.datezone.app.api.AuthFlow.signedIn(this, response));
     }
 }

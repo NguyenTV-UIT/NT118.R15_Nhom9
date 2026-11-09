@@ -73,7 +73,7 @@ public class ChangePasswordActivity extends AppCompatActivity {
         }
 
         if (tvSubtitle != null) {
-            tvSubtitle.setText("Nhập mật khẩu hiện tại. Chúng tôi sẽ gửi mã OTP gồm 6 chữ số tới email " + userEmail + " để xác nhận.");
+            tvSubtitle.setText("Nhập mật khẩu hiện tại và mật khẩu mới để bảo vệ tài khoản.");
         }
 
         setupListeners();
@@ -113,19 +113,32 @@ public class ChangePasswordActivity extends AppCompatActivity {
     }
 
     private void validateAndSendOtp() {
-        String password = edtCurrentPassword != null ? edtCurrentPassword.getText().toString().trim() : "";
+        String password = edtCurrentPassword != null ? edtCurrentPassword.getText().toString() : "";
 
-        if (TextUtils.isEmpty(password) || password.length() < 6) {
+        if (TextUtils.isEmpty(password)) {
             Toast.makeText(this, "Vui lòng nhập mật khẩu hiện tại của bạn", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        Toast.makeText(this, "Đã gửi mã OTP gồm 6 chữ số tới " + userEmail, Toast.LENGTH_SHORT).show();
-
-        // Mở màn hình nhập OTP lg_activity_otp_verification
-        Intent intent = new Intent(ChangePasswordActivity.this, OtpVerificationActivity.class);
-        intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_CHANGE_PASSWORD);
-        intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, userEmail);
-        startActivity(intent);
+        EditText newPassword = findViewById(R.id.edtChangeNewPassword);
+        EditText confirm = findViewById(R.id.edtChangeConfirmPassword);
+        String replacement = newPassword.getText().toString();
+        if (replacement.length() < 6 || replacement.length() > 72) {
+            newPassword.setError("Mật khẩu cần từ 6 đến 72 ký tự");
+            return;
+        }
+        if (!replacement.equals(confirm.getText().toString())) {
+            confirm.setError("Mật khẩu nhập lại không khớp");
+            return;
+        }
+        com.datezone.app.api.ApiUi.send(this, R.id.btnSendOtpChangePassword, true, "PUT", "auth/password",
+                com.datezone.app.api.ApiUi.data("currentPassword", password, "newPassword", replacement), response -> {
+                    new com.datezone.app.api.SessionStore(this).clear();
+                    Toast.makeText(this, "Đã đổi mật khẩu. Vui lòng đăng nhập lại.", Toast.LENGTH_LONG).show();
+                    Intent intent = new Intent(this, LoginActivity.class);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivity(intent);
+                    finish();
+                });
     }
 }

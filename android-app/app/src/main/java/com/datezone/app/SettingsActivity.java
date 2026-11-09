@@ -58,8 +58,8 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void updateSavedEmailDisplay() {
-        android.content.SharedPreferences prefs = getSharedPreferences(ProfileEditActivity.PREFS_NAME, MODE_PRIVATE);
-        String savedEmail = prefs.getString("KEY_SAVED_EMAIL", "minhanh.new@gmail.com");
+        org.json.JSONObject user = new com.datezone.app.api.SessionStore(this).user();
+        String savedEmail = user.isNull("email") ? "" : user.optString("email", "");
         android.widget.TextView tvEmail = findViewById(R.id.tvSettingsEmailValue);
         if (tvEmail != null && savedEmail != null) {
             tvEmail.setText(savedEmail);
@@ -226,6 +226,14 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void performLogout() {
+        com.datezone.app.api.SessionStore session = new com.datezone.app.api.SessionStore(this);
+        String refresh = session.refreshToken();
+        session.clear();
+        if (!refresh.isEmpty()) new com.datezone.app.api.ApiClient(this).publicRequest(this, "POST", "auth/logout",
+                com.datezone.app.api.ApiUi.data("refreshToken", refresh), new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) { }
+                    @Override public void onError(String message) { }
+                });
         Toast.makeText(this, "Đã đăng xuất thành công!", Toast.LENGTH_SHORT).show();
         Intent intent = new Intent(SettingsActivity.this, LoginActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);

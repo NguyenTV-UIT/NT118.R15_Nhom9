@@ -150,7 +150,8 @@ public class InterestsActivity extends AppCompatActivity {
         } else {
             android.content.Intent intent = new android.content.Intent(InterestsActivity.this, RelationshipGoalActivity.class);
             intent.putStringArrayListExtra("EXTRA_INTERESTS", new java.util.ArrayList<>(selected));
-            startActivity(intent);
+            com.datezone.app.api.ApiUi.save(this, "users/me/interests",
+                    com.datezone.app.api.ApiUi.data("interestNames", new org.json.JSONArray(selected)), intent);
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Toast;
@@ -84,6 +86,6 @@ public class ZodiacActivity extends AppCompatActivity {
         // Chuyển sang lg12_activity_smoking
         android.content.Intent intent = new android.content.Intent(ZodiacActivity.this, SmokingActivity.class);
         intent.putExtra("EXTRA_ZODIAC", selectedZodiac);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("zodiac", selectedZodiac), intent);
     }
 }

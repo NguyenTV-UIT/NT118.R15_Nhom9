@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.SeekBar;
@@ -83,6 +85,6 @@ public class HeightActivity extends AppCompatActivity {
         // Chuyển sang lg8_activity_weight
         android.content.Intent intent = new android.content.Intent(HeightActivity.this, WeightActivity.class);
         intent.putExtra("EXTRA_HEIGHT_CM", heightCm);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("heightCm", heightCm), intent);
     }
 }

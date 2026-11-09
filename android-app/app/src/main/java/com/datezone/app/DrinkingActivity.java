@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.RadioButton;
@@ -82,6 +84,6 @@ public class DrinkingActivity extends AppCompatActivity {
         // Chuyển sang lg14_activity_exercise
         android.content.Intent intent = new android.content.Intent(DrinkingActivity.this, ExerciseActivity.class);
         intent.putExtra("EXTRA_DRINKING", selectedDrinking);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("drinking", selectedDrinking), intent);
     }
 }

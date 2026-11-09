@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
@@ -50,6 +52,10 @@ public class EnterNameActivity extends AppCompatActivity {
         }
 
         edtName = findViewById(R.id.edtName);
+        if (savedInstanceState == null) {
+            org.json.JSONObject user = new com.datezone.app.api.SessionStore(this).user();
+            if (!user.isNull("displayName")) edtName.setText(user.optString("displayName", ""));
+        }
 
         // Nút Quay lại
         findViewById(R.id.btnBack).setOnClickListener(v -> finish());
@@ -76,6 +82,6 @@ public class EnterNameActivity extends AppCompatActivity {
         // Chuyển sang màn hình lg2_add_photo
         Intent intent = new Intent(EnterNameActivity.this, AddPhotosActivity.class);
         intent.putExtra("EXTRA_USER_NAME", name);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("displayName", name), intent);
     }
 }

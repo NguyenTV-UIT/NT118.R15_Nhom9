@@ -23,6 +23,12 @@ public class MatchSuccessDialog extends Dialog {
     private final int targetPhotoResId;
     private final int userPhotoResId;
     private final OnMatchActionListener listener;
+    private String remotePhotoUrl;
+
+    public MatchSuccessDialog(@NonNull Context context, String name, String photoUrl, OnMatchActionListener listener) {
+        this(context, name, R.drawable.discovery_profile_placeholder, R.drawable.discovery_profile_placeholder, listener);
+        remotePhotoUrl = photoUrl;
+    }
 
     public MatchSuccessDialog(
             @NonNull Context context,
@@ -72,11 +78,12 @@ public class MatchSuccessDialog extends Dialog {
         // Thẻ 2 (Phía sau): Ảnh chính đối tượng tương hợp
         ImageView ivTargetPhoto = findViewById(R.id.ivMatchPhotoTarget);
         if (ivTargetPhoto != null) {
-            ivTargetPhoto.setImageResource(targetPhotoResId);
+            if (remotePhotoUrl != null) com.datezone.app.api.RemoteImages.load(ivTargetPhoto, remotePhotoUrl);
+            else ivTargetPhoto.setImageResource(targetPhotoResId);
         }
 
         findViewById(R.id.btnSayHello).setOnClickListener(v -> {
-            Toast.makeText(getContext(), "Đã gửi lời chào tới " + targetName + "!", Toast.LENGTH_SHORT).show();
+            if (remotePhotoUrl == null) Toast.makeText(getContext(), "Đã gửi lời chào tới " + targetName + "!", Toast.LENGTH_SHORT).show();
             dismiss();
             if (listener != null) {
                 listener.onSayHello(targetName);

@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.SeekBar;
@@ -92,6 +94,6 @@ public class WeightActivity extends AppCompatActivity {
         // Chuyển sang lg9_activity_interests
         android.content.Intent intent = new android.content.Intent(WeightActivity.this, InterestsActivity.class);
         intent.putExtra("EXTRA_WEIGHT_KG", weightKg);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("weightKg", weightKg), intent);
     }
 }

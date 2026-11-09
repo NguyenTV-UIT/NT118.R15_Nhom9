@@ -28,6 +28,7 @@ import java.util.Locale;
 
 public class LocationDistanceActivity extends AppCompatActivity {
 
+    private Double latitude, longitude;
     private TextView tvLocation;
     private TextView tvDistance;
     private SeekBar seekDistance;
@@ -171,6 +172,8 @@ public class LocationDistanceActivity extends AppCompatActivity {
                 }
 
                 if (lastLocation != null) {
+                    latitude = lastLocation.getLatitude();
+                    longitude = lastLocation.getLongitude();
                     Geocoder geocoder = new Geocoder(this, Locale.getDefault());
                     List<Address> addresses = geocoder.getFromLocation(lastLocation.getLatitude(), lastLocation.getLongitude(), 1);
                     if (addresses != null && !addresses.isEmpty()) {
@@ -195,8 +198,8 @@ public class LocationDistanceActivity extends AppCompatActivity {
             // Ignore geocoding exception
         }
 
-        tvLocation.setText("Thành phố Hồ Chí Minh");
-        Toast.makeText(this, "Đã định vị: Thành phố Hồ Chí Minh", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Chưa lấy được tên khu vực. Vui lòng chọn khu vực của bạn.", Toast.LENGTH_SHORT).show();
+        showManualLocationDialog();
     }
 
     private void showManualLocationDialog() {
@@ -216,6 +219,7 @@ public class LocationDistanceActivity extends AppCompatActivity {
         builder.setTitle("Chọn khu vực của bạn");
 
         builder.setSingleChoiceItems(popularCities, -1, (dialog, which) -> {
+            latitude = null; longitude = null;
             tvLocation.setText(popularCities[which]);
             Toast.makeText(this, "Đã chọn: " + popularCities[which], Toast.LENGTH_SHORT).show();
             dialog.dismiss();
@@ -235,6 +239,7 @@ public class LocationDistanceActivity extends AppCompatActivity {
                 .setPositiveButton("Xác nhận", (dialog, which) -> {
                     String customCity = input.getText().toString().trim();
                     if (!customCity.isEmpty()) {
+                        latitude = null; longitude = null;
                         tvLocation.setText(customCity);
                         Toast.makeText(this, "Đã cập nhật khu vực: " + customCity, Toast.LENGTH_SHORT).show();
                     }
@@ -251,6 +256,9 @@ public class LocationDistanceActivity extends AppCompatActivity {
         android.content.Intent intent = new android.content.Intent(LocationDistanceActivity.this, HeightActivity.class);
         intent.putExtra("EXTRA_LOCATION", location);
         intent.putExtra("EXTRA_DISTANCE_KM", distanceKm);
-        startActivity(intent);
+        com.datezone.app.api.ApiUi.send(this, R.id.btnContinue, true, "PUT", "users/me/profile",
+                com.datezone.app.api.ApiUi.data("city", location, "latitude", latitude, "longitude", longitude), response ->
+                    com.datezone.app.api.ApiUi.save(this, "users/me/preferences",
+                            com.datezone.app.api.ApiUi.data("maxDistanceKm", distanceKm), intent));
     }
 }

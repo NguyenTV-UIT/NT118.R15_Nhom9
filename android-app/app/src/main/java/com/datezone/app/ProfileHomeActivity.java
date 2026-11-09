@@ -47,7 +47,8 @@ public class ProfileHomeActivity extends AppCompatActivity {
                         bottom + bars.bottom
                 );
 
-                return insets;
+                // The root already reserves this space; children must not add it again.
+                return insets.inset(bars.left, bars.top, bars.right, bars.bottom);
             });
             ViewCompat.requestApplyInsets(root);
         }
@@ -55,6 +56,16 @@ public class ProfileHomeActivity extends AppCompatActivity {
         setupButtons();
         setupBottomNavigation();
         loadSavedProfileData();
+        new com.datezone.app.api.ApiClient(this).request(this, "GET", "users/me", null,
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                        new com.datezone.app.api.SessionStore(ProfileHomeActivity.this).saveUser(response.getJSONObject("data"));
+                        loadSavedProfileData();
+                    }
+                    @Override public void onError(String message) {
+                        android.widget.Toast.makeText(ProfileHomeActivity.this, message, android.widget.Toast.LENGTH_LONG).show();
+                    }
+                });
     }
 
     @Override
@@ -64,20 +75,20 @@ public class ProfileHomeActivity extends AppCompatActivity {
     }
 
     private void loadSavedProfileData() {
-        SharedPreferences prefs = getSharedPreferences(ProfileEditActivity.PREFS_NAME, Context.MODE_PRIVATE);
-
-        String name = prefs.getString(ProfileEditActivity.KEY_NAME, "Trương Vĩnh Nguyên");
-        String bio = prefs.getString(ProfileEditActivity.KEY_BIO, "Thích du lịch, cà phê và nghe nhạc indie.");
-        String gender = prefs.getString(ProfileEditActivity.KEY_GENDER, "Nam");
-        String height = prefs.getString(ProfileEditActivity.KEY_HEIGHT, "170 cm");
-        String weight = prefs.getString(ProfileEditActivity.KEY_WEIGHT, "65 kg");
-        String location = prefs.getString(ProfileEditActivity.KEY_LOCATION, "Hồ Chí Minh, Việt Nam");
+        org.json.JSONObject user = new com.datezone.app.api.SessionStore(this).user();
+        String name = user.isNull("displayName") ? "Chưa có tên" : user.optString("displayName", "Chưa có tên");
+        String bio = user.isNull("bio") ? "Chưa có giới thiệu" : user.optString("bio");
+        String gender = "male".equals(user.optString("gender")) ? "Nam" : "female".equals(user.optString("gender")) ? "Nữ" : "Phi nhị nguyên";
+        String height = user.isNull("heightCm") ? "—" : user.optInt("heightCm") + " cm";
+        String weight = user.isNull("weightKg") ? "—" : user.optInt("weightKg") + " kg";
+        String location = user.isNull("city") ? "Chưa chọn khu vực" : user.optString("city");
 
         TextView tvName = findViewById(R.id.tvMyProfileName);
         if (tvName != null) tvName.setText(name);
 
         TextView tvAgeGender = findViewById(R.id.tvMyProfileAgeGender);
-        if (tvAgeGender != null) tvAgeGender.setText("20 tuổi • Giới tính " + gender);
+        if (tvAgeGender != null) tvAgeGender.setText((user.isNull("age") ? "" : user.optInt("age") + " tuổi")
+                + (user.isNull("gender") ? "" : " • " + gender));
 
         TextView tvMeasurements = findViewById(R.id.tvMyProfileMeasurements);
         if (tvMeasurements != null) tvMeasurements.setText("Cao " + height + " • Nặng " + weight);
@@ -87,6 +98,8 @@ public class ProfileHomeActivity extends AppCompatActivity {
 
         TextView tvLocation = findViewById(R.id.tvMyProfileLocation);
         if (tvLocation != null) tvLocation.setText("📍 " + location);
+        com.datezone.app.api.RemoteImages.load(findViewById(R.id.ivMyProfileAvatar),
+                user.isNull("avatarUrl") ? null : user.optString("avatarUrl"));
     }
 
     private void setupButtons() {

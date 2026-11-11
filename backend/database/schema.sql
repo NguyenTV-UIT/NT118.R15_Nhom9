@@ -8,6 +8,8 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS schema_migrations;
+DROP TABLE IF EXISTS account_deletions;
+DROP TABLE IF EXISTS calls;
 DROP TABLE IF EXISTS otp_codes;
 DROP TABLE IF EXISTS user_taste;
 DROP TABLE IF EXISTS device_tokens;
@@ -18,6 +20,7 @@ DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS matches;
 DROP TABLE IF EXISTS swipes;
 DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS user_interests;
 DROP TABLE IF EXISTS interests;
 DROP TABLE IF EXISTS photos;
@@ -34,11 +37,14 @@ SET FOREIGN_KEY_CHECKS = 1;
 CREATE TABLE users (
   id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   email              VARCHAR(255)  NULL,
+  email_verified_at  DATETIME      NULL,              -- đã xác thực email bằng OTP (đăng ký có OTP / quên mật khẩu / đổi email)
   phone              VARCHAR(20)   NULL,              -- dạng +84xxxxxxxxx
   phone_verified_at  DATETIME      NULL,
   password_hash   VARCHAR(255)  NOT NULL,
+  password_changed_at DATETIME  NULL,
   role            ENUM('user','admin')             NOT NULL DEFAULT 'user',
   status          ENUM('active','banned','deleted') NOT NULL DEFAULT 'active',
+  push_enabled    TINYINT(1)    NOT NULL DEFAULT 1,   -- Cài đặt: thông báo đẩy
   last_active_at  DATETIME      NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -46,11 +52,11 @@ CREATE TABLE users (
   UNIQUE KEY uq_users_phone (phone)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Mã OTP gửi qua email hoặc SMS (quên mật khẩu; đăng ký / đăng nhập bằng SĐT khi bật lại)
+-- Mã OTP gửi qua email hoặc SMS. purpose: reset_password | register | login | change_email | change_email_new
 CREATE TABLE otp_codes (
   id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   target       VARCHAR(255)    NOT NULL,           -- email hoặc SĐT +84...
-  purpose      ENUM('register','login','reset_password') NOT NULL,
+  purpose      VARCHAR(32)     NOT NULL,
   code_hash    CHAR(64)        NOT NULL,           -- SHA-256(target:purpose:code)
   attempts     TINYINT UNSIGNED NOT NULL DEFAULT 0,
   expires_at   DATETIME        NOT NULL,
@@ -59,16 +65,35 @@ CREATE TABLE otp_codes (
   KEY idx_otp_target (target, purpose, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Phiên đăng nhập theo thiết bị (màn Cài đặt > Thiết bị đang đăng nhập). Thu hồi phiên = đăng xuất thiết bị đó ngay.
+CREATE TABLE sessions (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id         BIGINT UNSIGNED NOT NULL,
+  device_name     VARCHAR(120)    NOT NULL DEFAULT 'Thiết bị không xác định',
+  platform        VARCHAR(20)     NULL,
+  location        VARCHAR(120)    NULL,
+  ip              VARCHAR(45)     NULL,
+  user_agent      VARCHAR(255)    NULL,
+  created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_active_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revoked_at      DATETIME        NULL,
+  KEY idx_sessions_user (user_id, revoked_at),
+  CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE refresh_tokens (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id     BIGINT UNSIGNED NOT NULL,
+  session_id  BIGINT UNSIGNED NULL,
   token_hash  CHAR(64)        NOT NULL,           -- SHA-256 của refresh token
   expires_at  DATETIME        NOT NULL,
   revoked_at  DATETIME        NULL,
   created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_refresh_token_hash (token_hash),
   KEY idx_refresh_user (user_id),
-  CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  KEY idx_refresh_session (session_id),
+  CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_refresh_session FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -83,6 +108,8 @@ CREATE TABLE profiles (
   birthday           DATE          NULL,
   gender             ENUM('male','female','other') NULL,   -- other = phi nhị nguyên
   show_gender        TINYINT(1)    NOT NULL DEFAULT 1,
+  show_distance      TINYINT(1)    NOT NULL DEFAULT 1,     -- Cài đặt: hiện khoảng cách của tôi
+  show_active_status TINYINT(1)    NOT NULL DEFAULT 1,     -- Cài đặt: hiện trạng thái hoạt động
   bio                VARCHAR(500)  NULL,
   job_title          VARCHAR(100)  NULL,
   school             VARCHAR(150)  NULL,
@@ -157,6 +184,8 @@ CREATE TABLE matches (
   id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user1_id      BIGINT UNSIGNED NOT NULL,
   user2_id      BIGINT UNSIGNED NOT NULL,
+  user1_msg_count INT UNSIGNED NOT NULL DEFAULT 0,   -- số tin user1 đã gửi (độ thân thiết = min của 2 bên, tối đa 20)
+  user2_msg_count INT UNSIGNED NOT NULL DEFAULT 0,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   unmatched_at  DATETIME NULL,
   UNIQUE KEY uq_matches_pair (user1_id, user2_id),
@@ -166,19 +195,39 @@ CREATE TABLE matches (
 )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
--- 4. MESSAGE (dùng ở giai đoạn sau: chat realtime qua WebSocket)
+-- 4. MESSAGE + CALL (realtime qua WebSocket /ws)
 -- ---------------------------------------------------------------------
 CREATE TABLE messages (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   match_id    BIGINT UNSIGNED NOT NULL,
   sender_id   BIGINT UNSIGNED NOT NULL,
-  type        ENUM('text','image') NOT NULL DEFAULT 'text',
+  type        VARCHAR(16)     NOT NULL DEFAULT 'text',   -- text | image (đường dẫn ảnh) | call (JSON nhật ký cuộc gọi)
   content     TEXT            NOT NULL,
+  client_id   VARCHAR(64)     NULL,                      -- id do app tự sinh, chống gửi trùng khi mạng chập chờn
   read_at     DATETIME        NULL,
   created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_messages_client (match_id, sender_id, client_id),
+  KEY idx_messages_unread (match_id, sender_id, read_at),
   KEY idx_messages_match (match_id, id),
   CONSTRAINT fk_messages_match  FOREIGN KEY (match_id)  REFERENCES matches(id) ON DELETE CASCADE,
   CONSTRAINT fk_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id)   ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE calls (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  match_id     BIGINT UNSIGNED NOT NULL,
+  caller_id    BIGINT UNSIGNED NOT NULL,
+  callee_id    BIGINT UNSIGNED NOT NULL,
+  type         VARCHAR(8)      NOT NULL,                      -- voice | video
+  status       VARCHAR(16)     NOT NULL DEFAULT 'ringing',    -- ringing | accepted | rejected | cancelled | missed | ended
+  created_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  answered_at  DATETIME        NULL,
+  ended_at     DATETIME        NULL,
+  KEY idx_calls_match (match_id, id),
+  KEY idx_calls_callee (callee_id, status),
+  CONSTRAINT fk_calls_match  FOREIGN KEY (match_id)  REFERENCES matches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_calls_caller FOREIGN KEY (caller_id) REFERENCES users(id)   ON DELETE CASCADE,
+  CONSTRAINT fk_calls_callee FOREIGN KEY (callee_id) REFERENCES users(id)   ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -198,7 +247,7 @@ CREATE TABLE reports (
   id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   reporter_id  BIGINT UNSIGNED NOT NULL,
   reported_id  BIGINT UNSIGNED NOT NULL,
-  reason       ENUM('fake_profile','harassment','inappropriate_content','spam','other') NOT NULL,
+  reason       VARCHAR(32)     NOT NULL,   -- fake_profile | sexual_content | harassment | scam_spam | underage | other
   details      VARCHAR(1000)   NULL,
   status       ENUM('pending','reviewed','dismissed') NOT NULL DEFAULT 'pending',
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -213,7 +262,7 @@ CREATE TABLE reports (
 CREATE TABLE notifications (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id     BIGINT UNSIGNED NOT NULL,
-  type        ENUM('new_match','new_message','super_like','system') NOT NULL,
+  type        VARCHAR(32)     NOT NULL,   -- new_match | new_message | new_like | super_like | missed_call | system
   payload     JSON            NULL,
   read_at     DATETIME        NULL,
   created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -246,6 +295,14 @@ CREATE TABLE user_taste (
   weights          JSON          NULL,                -- trọng số cá nhân {"interests":..,"distance":..,"age":..}
   updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_taste_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Lý do xoá tài khoản (thống kê ẩn danh - không lưu ai đã xoá)
+CREATE TABLE account_deletions (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  reason      VARCHAR(32)   NULL,
+  details     VARCHAR(500)  NULL,
+  created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------

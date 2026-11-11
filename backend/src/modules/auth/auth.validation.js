@@ -11,7 +11,11 @@ const password = z.string().min(6, 'Mật khẩu tối thiểu 6 ký tự').max(
 const register = z.object({
   email,
   password: v.password8,
+  otp: v.otp.optional(), // bắt buộc khi server bật REGISTER_OTP_REQUIRED
 });
+
+const emailOnly = z.object({ email });
+const emailOtp = z.object({ email, otp: v.otp });
 
 const login = z.object({
   email,
@@ -68,6 +72,8 @@ const changePassword = z.object({
 });
 
 module.exports = {
+  emailOnly,
+  emailOtp,
   register,
   login,
   forgotPassword,

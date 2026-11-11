@@ -10,6 +10,14 @@ const pool = mysql.createPool({
   dateStrings: ['DATE'], // trả về DATE dạng 'YYYY-MM-DD' thay vì Date object
 });
 
+// Mọi mốc thời gian đều là UTC: ép múi giờ của phiên MySQL về UTC để cột DEFAULT CURRENT_TIMESTAMP
+// khớp với UTC_TIMESTAMP() dù máy chủ MySQL đặt múi giờ nào.
+if (typeof pool.on === 'function') {
+  pool.on('connection', (conn) => {
+    conn.query("SET time_zone = '+00:00'", (err) => err && console.error('[db] SET time_zone:', err.message));
+  });
+}
+
 /** Chạy 1 câu SQL, trả về rows (SELECT) hoặc result (INSERT/UPDATE). */
 async function query(sql, params = []) {
   const [rows] = await pool.query(sql, params);

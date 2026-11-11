@@ -2,9 +2,11 @@ const http = require('http');
 const env = require('./config/env');
 const db = require('./config/db');
 const app = require('./app');
+const hub = require('./realtime/hub');
 
 const server = http.createServer(app);
-// Giai đoạn sau: gắn WebSocket (chat realtime, WebRTC signaling) vào `server` này.
+// WebSocket realtime tại ws://<host>/ws (chat, trạng thái online, cuộc gọi) - xem src/realtime/hub.js
+hub.attach(server);
 
 async function start() {
   try {
@@ -16,12 +18,13 @@ async function start() {
   }
 
   server.listen(env.port, '0.0.0.0', () => {
-    console.log(`[api] Server chạy tại http://0.0.0.0:${env.port} (${env.nodeEnv})`);
+    console.log(`[api] Server chạy tại http://0.0.0.0:${env.port} (${env.nodeEnv}), WebSocket tại /ws`);
   });
 }
 
 function shutdown(signal) {
   console.log(`[api] Nhận ${signal}, đang tắt server...`);
+  hub.close();
   server.close(async () => {
     await db.pool.end().catch(() => {});
     process.exit(0);
@@ -33,3 +36,5 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 start();
+
+module.exports = server; // dùng cho test

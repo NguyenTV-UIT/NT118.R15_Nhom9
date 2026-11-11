@@ -13,6 +13,8 @@ const authRoutes = require('./modules/auth/auth.routes');
 const userRoutes = require('./modules/users/users.routes');
 const homeRoutes = require('./modules/home/home.routes');
 const metaRoutes = require('./modules/meta/meta.routes');
+const chatRoutes = require('./modules/chats/chats.routes');
+const callRoutes = require('./modules/chats/calls.routes');
 
 const app = express();
 
@@ -40,6 +42,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/meta', metaRoutes);
+app.use('/api/chats', chatRoutes);
+app.use('/api/calls', callRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

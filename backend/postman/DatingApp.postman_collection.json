@@ -66,6 +66,26 @@
     {
       "key": "binhId",
       "value": ""
+    },
+    {
+      "key": "chatMatchId",
+      "value": ""
+    },
+    {
+      "key": "callId",
+      "value": ""
+    },
+    {
+      "key": "sessionId",
+      "value": ""
+    },
+    {
+      "key": "emailChangeToken",
+      "value": ""
+    },
+    {
+      "key": "lastMessageId",
+      "value": ""
     }
   ],
   "item": [
@@ -3966,6 +3986,1815 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "8. Cài đặt & tài khoản (v4)",
+      "description": "Màn Settings: công tắc, thiết bị đang đăng nhập, đổi email, danh sách chặn, xoá tài khoản.",
+      "item": [
+        {
+          "name": "Đăng nhập (Khoa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"khoa@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('myId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem cài đặt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "settings"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bật / tắt công tắc",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "settings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pushEnabled\": true,\n  \"showActiveStatus\": true,\n  \"showDistance\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thiết bị đang đăng nhập",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "sessions"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const s = pm.response.json().data; pm.collectionVariables.set('sessionId', (s.find((x) => !x.current) || s[0]).id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng xuất 1 thiết bị",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "Nếu là thiết bị hiện tại thì token đang dùng sẽ bị từ chối (401 SESSION_REVOKED) → đăng nhập lại."
+          }
+        },
+        {
+          "name": "Đăng xuất tất cả thiết bị khác",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "sessions"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Đổi email 1: xác nhận email hiện tại → gửi OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/email/verify-current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "email",
+                "verify-current"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"khoa@demo.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data; if (d && d.devOtp) pm.collectionVariables.set('otp', d.devOtp);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đổi email 2: nhập OTP → emailChangeToken",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/email/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "email",
+                "verify-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otp\": \"{{otp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data; if (d) pm.collectionVariables.set('emailChangeToken', d.emailChangeToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đổi email 3: email mới",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "email"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailChangeToken\": \"{{emailChangeToken}}\",\n  \"newEmail\": \"khoa.moi@demo.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Chạy xong thì Khoa đăng nhập bằng khoa.moi@demo.local. Muốn trả lại: chạy lại 3 bước với email mới → khoa@demo.local."
+          }
+        },
+        {
+          "name": "Đăng ký thiết bị nhận thông báo đẩy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/device-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "device-token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"fcm-token-demo-123456\",\n  \"platform\": \"android\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Huỷ đăng ký thiết bị",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/device-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "device-token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"fcm-token-demo-123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Danh sách chặn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/me/blocks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me",
+                "blocks"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xoá tài khoản (KHÔNG khôi phục được!)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirm\": \"XÓA\",\n  \"reason\": \"taking_break\",\n  \"details\": \"test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Xoá vĩnh viễn tài khoản đang đăng nhập. Chỉ chạy với tài khoản test tự đăng ký; chạy `npm run db:seed` để tạo lại tài khoản demo."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Lượt thích, chặn & báo cáo (v4)",
+      "item": [
+        {
+          "name": "Đăng nhập (An)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"an@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('anId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng nhập (Giang)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"giang@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('myId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Giang thích An",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/home/swipe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home",
+                "swipe"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetId\": \"{{anId}}\",\n  \"action\": \"like\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng nhập (An)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"an@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('anId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tab Lượt thích của An",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/home/likes?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home",
+                "likes"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Những người đã thích mình mà mình chưa quẹt. `group`: today | yesterday | earlier. Thích lại / bỏ qua bằng POST /home/swipe."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data; if (d[0]) pm.collectionVariables.set('targetId', d[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem hồ sơ + quan hệ (relation)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm kiếm với bộ lọc nâng cao",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/home/search?gender=everyone&zodiac=leo,virgo&education=bachelor,college&minHeight=155&maxHeight=175&sameCity=false",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "gender",
+                  "value": "everyone"
+                },
+                {
+                  "key": "zodiac",
+                  "value": "leo,virgo"
+                },
+                {
+                  "key": "education",
+                  "value": "bachelor,college"
+                },
+                {
+                  "key": "minHeight",
+                  "value": "155"
+                },
+                {
+                  "key": "maxHeight",
+                  "value": "175"
+                },
+                {
+                  "key": "sameCity",
+                  "value": "false"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tương hợp gần đây",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/home/matches?sort=recent&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home",
+                "matches"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "recent"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chặn",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetId}}/block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetId}}",
+                "block"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bỏ chặn",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetId}}/block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetId}}",
+                "block"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Báo cáo và chặn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetId}}/report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetId}}",
+                "report"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"scam_spam\",\n  \"details\": \"Gửi link lạ\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "reason: fake_profile | sexual_content | harassment | scam_spam | underage | other (hoặc nhãn tiếng Việt trên app). Báo cáo xong tự chặn + huỷ tương hợp."
+          }
+        },
+        {
+          "name": "Bỏ chặn (dọn dẹp)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{targetId}}/block",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{targetId}}",
+                "block"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Kịch bản Chat (Run folder) (v4)",
+      "description": "An và Bình thích nhau → nhắn tin → đã đọc → ảnh / gọi còn bị khoá (cần 10 / 20 tin mỗi bên).\nMuốn mở khoá nhanh để test ảnh và cuộc gọi: chạy `npm run db:simulate-chat` trên server.",
+      "item": [
+        {
+          "name": "Đăng nhập (An)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"an@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('anId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng nhập (Bình)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"binh@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('binhId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bình thích An",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/home/swipe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home",
+                "swipe"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetId\": \"{{anId}}\",\n  \"action\": \"like\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng nhập (An)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"an@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('anId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "An thích Bình → tương hợp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/home/swipe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home",
+                "swipe"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetId\": \"{{binhId}}\",\n  \"action\": \"like\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data; pm.test('matched', () => pm.expect(d.matched).to.eql(true)); pm.collectionVariables.set('chatMatchId', d.matchId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Danh sách cuộc trò chuyện",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chi tiết cuộc trò chuyện + độ thân thiết",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "An gửi tin nhắn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "messages"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Chào Bình 👋\",\n  \"clientId\": \"{{$guid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('lastMessageId', pm.response.json().data.message.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đăng nhập (Bình)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Name",
+                "value": "Postman"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"binh@demo.local\",\n  \"password\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('accessToken', d.tokens.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);",
+                  "pm.collectionVariables.set('binhId', d.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bình: chat chưa đọc",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats?filter=unread",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats"
+              ],
+              "query": [
+                {
+                  "key": "filter",
+                  "value": "unread"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('có tin chưa đọc', () => pm.expect(pm.response.json().meta.unreadMessages).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bình xem tin nhắn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/messages?limit=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "30"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bình đánh dấu đã đọc",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "read"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bình trả lời",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "messages"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Chào An!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Màn Thân thiết",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/intimacy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "intimacy"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm cuộc trò chuyện",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats?q=an",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "an"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gửi ảnh (403 PHOTO_LOCKED nếu chưa đủ 10 tin mỗi bên)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/photos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "photos"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Chọn 1 file ảnh jpg/png/webp"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Gọi thoại (403 CALL_LOCKED nếu chưa đủ 20 tin mỗi bên)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "calls"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"voice\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data; if (d && d.call) pm.collectionVariables.set('callId', d.call.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11. Cuộc gọi (v4)",
+      "description": "Cần độ thân thiết 20/20. Người gọi: POST /chats/:matchId/calls. Người nhận (đăng nhập tài khoản kia): accept / reject. Gói WebRTC đi qua WebSocket (sự kiện call.signal).",
+      "item": [
+        {
+          "name": "Máy chủ STUN/TURN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/ice-servers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "ice-servers"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bắt đầu gọi video",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/{{chatMatchId}}/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                "{{chatMatchId}}",
+                "calls"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"video\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data; if (d && d.call) pm.collectionVariables.set('callId', d.call.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cuộc gọi đang diễn ra của tôi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "active"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data; if (d.call) pm.collectionVariables.set('callId', d.call.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem cuộc gọi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/{{callId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "{{callId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Nhấc máy (người nhận)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/{{callId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "{{callId}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Từ chối (người nhận)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/{{callId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "{{callId}}",
+                "reject"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Huỷ khi đang đổ chuông (người gọi)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/{{callId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "{{callId}}",
+                "cancel"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cúp máy (dùng được mọi lúc)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calls/{{callId}}/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calls",
+                "{{callId}}",
+                "end"
+              ]
+            }
+          }
         }
       ]
     }

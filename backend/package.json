@@ -14,7 +14,8 @@
     "db:migrate": "node scripts/db-migrate.js",
     "db:seed": "node scripts/db-seed.js",
     "db:reset": "node scripts/db-init.js && node scripts/db-seed.js",
-    "db:simulate": "node scripts/simulate-swipes.js"
+    "db:simulate": "node scripts/simulate-swipes.js",
+    "db:simulate-chat": "node scripts/simulate-chat.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -27,6 +28,7 @@
     "multer": "^2.0.2",
     "mysql2": "^3.11.5",
     "nodemailer": "^6.9.16",
+    "ws": "^8.18.0",
     "zod": "^3.24.1"
   },
   "license": "MIT"

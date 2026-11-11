@@ -5,6 +5,15 @@ function bool(value, fallback) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
+function json(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error('Biến môi trường ICE_SERVERS không phải JSON hợp lệ');
+  }
+}
+
 function required(name) {
   const value = process.env[name];
   if (!value) {
@@ -57,6 +66,25 @@ const env = {
     maxAttempts: 5,
     maxPerHour: Number(process.env.OTP_MAX_PER_HOUR || 5),
   },
+  // Đăng ký email có bắt buộc xác thực OTP không (mặc định: không - app gọi thẳng /auth/register)
+  registerOtpRequired: bool(process.env.REGISTER_OTP_REQUIRED, false),
+  // Đăng nhập email có bước OTP thứ 2 không (mặc định: không)
+  emailLoginOtpRequired: bool(process.env.EMAIL_LOGIN_OTP_REQUIRED, false),
+  // Đổi email: có gửi OTP tới email MỚI để xác nhận không (mặc định: không - giống luồng trên app)
+  emailChangeVerifyNew: bool(process.env.EMAIL_CHANGE_VERIFY_NEW, false),
+
+  chat: {
+    intimacyPhoto: 10, // đủ 10 tin mỗi bên -> mở khoá gửi ảnh
+    intimacyCall: 20, // đủ 20 tin mỗi bên -> mở khoá gọi thoại / video ("thân thiết")
+    maxMessageLength: 2000,
+    callRingSeconds: Number(process.env.CALL_RING_SECONDS || 45), // đổ chuông tối đa, quá thì thành cuộc gọi nhỡ
+    onlineWindowSeconds: 300, // có hoạt động trong 5 phút gần đây = "Đang online"
+  },
+  // Máy chủ STUN/TURN cho WebRTC (JSON mảng iceServers). Mặc định dùng STUN công cộng của Google.
+  iceServers: json(process.env.ICE_SERVERS, [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]),
+  // push: console = chỉ ghi log (chưa cấu hình Firebase). Xem src/services/push.js
+  pushProvider: process.env.PUSH_PROVIDER || 'console',
+
   // Đăng nhập bằng SĐT có cần bước OTP thứ 2 không (app hiện tại: có)
   loginOtpRequired: bool(process.env.LOGIN_OTP_REQUIRED, true),
   // Số ảnh tối thiểu để hoàn tất hồ sơ (app yêu cầu 2)

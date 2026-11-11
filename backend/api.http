@@ -135,3 +135,105 @@ Content-Type: application/json
 ### Onboarding: hoàn tất hồ sơ
 POST {{baseUrl}}/users/me/onboarding/complete
 Authorization: Bearer {{token}}
+
+########## v4: CÀI ĐẶT, AN TOÀN, CHAT, CUỘC GỌI ##########
+
+### Cài đặt
+GET {{baseUrl}}/users/me/settings
+Authorization: Bearer {{token}}
+
+### Bật / tắt công tắc
+PUT {{baseUrl}}/users/me/settings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "showDistance": false, "showActiveStatus": true, "pushEnabled": true }
+
+### Thiết bị đang đăng nhập
+GET {{baseUrl}}/users/me/sessions
+Authorization: Bearer {{token}}
+
+### Đăng xuất tất cả thiết bị khác
+DELETE {{baseUrl}}/users/me/sessions
+Authorization: Bearer {{token}}
+
+### Đổi email 1/3: xác nhận email hiện tại (gửi OTP)
+POST {{baseUrl}}/users/me/email/verify-current
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "email": "an@demo.local" }
+
+### Đổi email 2/3: nhập OTP -> emailChangeToken
+POST {{baseUrl}}/users/me/email/verify-otp
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "otp": "123456" }
+
+### Đổi email 3/3
+PUT {{baseUrl}}/users/me/email
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "emailChangeToken": "<emailChangeToken>", "newEmail": "an.moi@demo.local" }
+
+### Tab Lượt thích
+GET {{baseUrl}}/home/likes
+Authorization: Bearer {{token}}
+
+### Tìm kiếm với bộ lọc nâng cao
+GET {{baseUrl}}/home/search?gender=everyone&zodiac=leo,virgo&education=bachelor&minHeight=155&maxHeight=175&sameCity=true
+Authorization: Bearer {{token}}
+
+### Chặn
+POST {{baseUrl}}/users/3/block
+Authorization: Bearer {{token}}
+
+### Báo cáo và chặn
+POST {{baseUrl}}/users/3/report
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "reason": "harassment", "details": "Nhắn tin làm phiền" }
+
+### Danh sách cuộc trò chuyện (filter: all | close | unread | new)
+GET {{baseUrl}}/chats?filter=all
+Authorization: Bearer {{token}}
+
+### Màn Thân thiết
+GET {{baseUrl}}/chats/intimacy
+Authorization: Bearer {{token}}
+
+### Tin nhắn của 1 cuộc trò chuyện
+GET {{baseUrl}}/chats/1/messages?limit=30
+Authorization: Bearer {{token}}
+
+### Gửi tin nhắn
+POST {{baseUrl}}/chats/1/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "content": "Chào bạn 👋", "clientId": "tin-001" }
+
+### Đánh dấu đã đọc
+POST {{baseUrl}}/chats/1/read
+Authorization: Bearer {{token}}
+
+### Bắt đầu gọi (cần độ thân thiết 20/20)
+POST {{baseUrl}}/chats/1/calls
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "type": "video" }
+
+### Cúp máy
+POST {{baseUrl}}/calls/1/end
+Authorization: Bearer {{token}}
+
+### Xoá tài khoản (KHÔNG khôi phục được)
+DELETE {{baseUrl}}/users/me
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "confirm": "XÓA", "reason": "taking_break" }

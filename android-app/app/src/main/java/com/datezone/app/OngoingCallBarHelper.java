@@ -143,6 +143,11 @@ public class OngoingCallBarHelper {
             intent.putExtra(ChatCallActivity.EXTRA_NAME, manager.getPartnerName());
             intent.putExtra(ChatCallActivity.EXTRA_PHOTO_RES_ID, manager.getPartnerPhotoResId());
             intent.putExtra(ChatCallActivity.EXTRA_IS_VIDEO_CALL, manager.isVideoCall());
+            if (manager.getMatchId() > 0) {
+                intent.putExtra(ChatCallActivity.EXTRA_MATCH_ID, manager.getMatchId());
+                intent.putExtra(ChatCallActivity.EXTRA_CALL_ID, manager.getCallId());
+                intent.putExtra(ChatCallActivity.EXTRA_PHOTO_URL, manager.getPhotoUrl());
+            }
             intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             activity.startActivity(intent);
         });

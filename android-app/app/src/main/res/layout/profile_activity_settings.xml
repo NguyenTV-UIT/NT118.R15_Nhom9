@@ -161,6 +161,7 @@
                                 android:textStyle="bold" />
 
                             <TextView
+                                android:id="@+id/tvSettingsPasswordChanged"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
@@ -212,6 +213,7 @@
                             android:orientation="vertical">
 
                             <TextView
+                                android:id="@+id/tvSettingsCurrentDeviceName"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="iPhone 13"
@@ -220,6 +222,7 @@
                                 android:textStyle="bold" />
 
                             <TextView
+                                android:id="@+id/tvSettingsCurrentDeviceInfo"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
@@ -261,6 +264,7 @@
                             android:orientation="vertical">
 
                             <TextView
+                                android:id="@+id/tvSettingsOtherDeviceName"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Chrome trên Windows"
@@ -269,6 +273,7 @@
                                 android:textStyle="bold" />
 
                             <TextView
+                                android:id="@+id/tvSettingsOtherDeviceInfo"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"

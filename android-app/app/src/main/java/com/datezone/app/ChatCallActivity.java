@@ -25,6 +25,21 @@ public class ChatCallActivity extends AppCompatActivity {
     public static final String EXTRA_NAME = "EXTRA_NAME";
     public static final String EXTRA_PHOTO_RES_ID = "EXTRA_PHOTO_RES_ID";
     public static final String EXTRA_IS_VIDEO_CALL = "EXTRA_IS_VIDEO_CALL";
+    /** Có EXTRA_MATCH_ID (> 0): cuộc gọi được đăng ký với máy chủ. EXTRA_CALL_ID: mở lại / nhận 1 cuộc gọi đã có. */
+    public static final String EXTRA_MATCH_ID = "EXTRA_MATCH_ID";
+    public static final String EXTRA_CALL_ID = "EXTRA_CALL_ID";
+    public static final String EXTRA_PHOTO_URL = "EXTRA_PHOTO_URL";
+    private static final long STATUS_POLL_MS = 2000;
+
+    private long matchId;
+    private long callId;
+    private boolean remote;
+    private boolean callClosed;
+    private String targetPhotoUrl = "";
+    private com.datezone.app.api.ApiClient api;
+    private final Runnable statusPoll = new Runnable() {
+        @Override public void run() { pollCallStatus(); }
+    };
 
     private String targetName = "Nguyên";
     private int targetPhotoResId = R.drawable.discovery_photo_1;
@@ -109,7 +124,13 @@ public class ChatCallActivity extends AppCompatActivity {
             if (intent.hasExtra(EXTRA_IS_VIDEO_CALL)) {
                 isVideoCall = intent.getBooleanExtra(EXTRA_IS_VIDEO_CALL, false);
             }
+            matchId = intent.getLongExtra(EXTRA_MATCH_ID, 0);
+            callId = intent.getLongExtra(EXTRA_CALL_ID, 0);
+            String url = intent.getStringExtra(EXTRA_PHOTO_URL);
+            targetPhotoUrl = url == null ? "" : url;
         }
+        remote = matchId > 0;
+        if (remote) api = new com.datezone.app.api.ApiClient(this);
 
         initViews();
         setupCallData();
@@ -145,6 +166,14 @@ public class ChatCallActivity extends AppCompatActivity {
         if (ivPipAvatar != null) ivPipAvatar.setImageResource(targetPhotoResId);
 
         ActiveCallManager.getInstance().startCall(targetName, targetPhotoResId, isVideoCall);
+        if (remote) {
+            ActiveCallManager.getInstance().setRemoteCall(matchId, callId, targetPhotoUrl);
+            if (!targetPhotoUrl.isEmpty()) {
+                if (ivCallAvatar != null) com.datezone.app.api.RemoteImages.load(ivCallAvatar, targetPhotoUrl);
+                if (ivCallBackground != null) com.datezone.app.api.RemoteImages.load(ivCallBackground, targetPhotoUrl);
+                if (ivPipAvatar != null) com.datezone.app.api.RemoteImages.load(ivPipAvatar, targetPhotoUrl);
+            }
+        }
 
         if (isVideoCall) {
             isVideoOn = true;
@@ -181,7 +210,77 @@ public class ChatCallActivity extends AppCompatActivity {
             }
         };
 
+        if (remote) {
+            // Cuộc gọi thật: chỉ bắt đầu đếm giờ khi máy chủ báo người kia đã nhấc máy
+            tvCallStatus.setText("Đang kết nối…");
+            if (callId > 0) pollCallStatus();
+            else startRemoteCall();
+            return;
+        }
+
         timerHandler.postDelayed(timerRunnable, 2000);
+    }
+
+    // ═══════════════ CUỘC GỌI ĐĂNG KÝ VỚI MÁY CHỦ ═══════════════
+
+    /** POST /chats/:matchId/calls - bắt đầu đổ chuông bên máy người kia. */
+    private void startRemoteCall() {
+        api.request(this, "POST", "chats/" + matchId + "/calls",
+                com.datezone.app.api.ApiUi.data("type", isVideoCall ? "video" : "voice"),
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                        callId = response.getJSONObject("data").getJSONObject("call").getLong("id");
+                        ActiveCallManager.getInstance().setRemoteCall(matchId, callId, targetPhotoUrl);
+                        if (tvCallStatus != null) tvCallStatus.setText("Đang đổ chuông…");
+                        timerHandler.postDelayed(statusPoll, STATUS_POLL_MS);
+                    }
+                    @Override public void onError(String message) {
+                        closeRemoteCall(message);
+                    }
+                });
+    }
+
+    /** GET /calls/:callId mỗi 2 giây: nhấc máy -> đếm giờ; từ chối / nhỡ / kết thúc -> đóng màn. */
+    private void pollCallStatus() {
+        if (callClosed || isFinishing()) return;
+        api.request(this, "GET", "calls/" + callId, null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONObject call = response.getJSONObject("data").getJSONObject("call");
+                String status = call.optString("status");
+                if ("ringing".equals(status)) {
+                    if (tvCallStatus != null) tvCallStatus.setText("Đang đổ chuông…");
+                } else if ("accepted".equals(status)) {
+                    if (!isCallConnected) {
+                        isCallConnected = true;
+                        java.util.Date answered = com.datezone.app.api.ChatUi.parseTime(call.optString("answeredAt"));
+                        long elapsed = answered == null ? 0 : (System.currentTimeMillis() - answered.getTime()) / 1000;
+                        secondsElapsed = (int) Math.max(0, Math.min(elapsed, 24 * 3600));
+                        timerHandler.removeCallbacks(timerRunnable);
+                        timerHandler.post(timerRunnable);
+                    }
+                } else {
+                    closeRemoteCall("rejected".equals(status) ? targetName + " đã từ chối cuộc gọi"
+                            : "missed".equals(status) ? targetName + " không nghe máy"
+                            : "Cuộc gọi đã kết thúc");
+                    return;
+                }
+                timerHandler.postDelayed(statusPoll, STATUS_POLL_MS);
+            }
+            @Override public void onError(String message) {
+                // Mất mạng tạm thời: thử lại ở lần hỏi sau
+                timerHandler.postDelayed(statusPoll, STATUS_POLL_MS);
+            }
+        });
+    }
+
+    private void closeRemoteCall(String message) {
+        if (callClosed) return;
+        callClosed = true;
+        ActiveCallManager.getInstance().endCall();
+        timerHandler.removeCallbacks(statusPoll);
+        timerHandler.removeCallbacks(timerRunnable);
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        finish();
     }
 
     private void setupListeners() {
@@ -304,14 +403,29 @@ public class ChatCallActivity extends AppCompatActivity {
 
         Intent intent = new Intent(ChatCallActivity.this, ChatDetailActivity.class);
         intent.putExtra(ChatDetailActivity.EXTRA_NAME, targetName);
-        intent.putExtra(ChatDetailActivity.EXTRA_PHOTO_RES_ID, targetPhotoResId);
-        intent.putExtra(ChatDetailActivity.EXTRA_INITIAL_MSG_COUNT, 20);
+        if (remote) {
+            ActiveCallManager.getInstance().setRemoteCall(matchId, callId, targetPhotoUrl);
+            intent.putExtra(ChatDetailActivity.EXTRA_MATCH_ID, matchId);
+            intent.putExtra(ChatDetailActivity.EXTRA_PHOTO_URL, targetPhotoUrl);
+        } else {
+            intent.putExtra(ChatDetailActivity.EXTRA_PHOTO_RES_ID, targetPhotoResId);
+            intent.putExtra(ChatDetailActivity.EXTRA_INITIAL_MSG_COUNT, 20);
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(intent);
         finish();
     }
 
     private void finishCall() {
+        if (remote && callId > 0 && !callClosed) {
+            // Cúp máy: máy chủ tự hiểu là huỷ (đang đổ chuông) hay kết thúc (đang nói chuyện)
+            callClosed = true;
+            api.request(this, "POST", "calls/" + callId + "/end", null, new com.datezone.app.api.ApiClient.Callback() {
+                @Override public void onSuccess(org.json.JSONObject response) { }
+                @Override public void onError(String message) { }
+            });
+        }
+        timerHandler.removeCallbacks(statusPoll);
         ActiveCallManager.getInstance().endCall();
         timerHandler.removeCallbacks(timerRunnable);
         Toast.makeText(this, "Đã kết thúc cuộc gọi", Toast.LENGTH_SHORT).show();
@@ -324,5 +438,6 @@ public class ChatCallActivity extends AppCompatActivity {
         if (timerHandler != null && timerRunnable != null) {
             timerHandler.removeCallbacks(timerRunnable);
         }
+        timerHandler.removeCallbacks(statusPoll);
     }
 }

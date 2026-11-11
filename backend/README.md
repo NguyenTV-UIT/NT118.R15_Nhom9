@@ -378,6 +378,7 @@ POST /calls/:id/end            ──▶  ended + ghi nhật ký vào chat  ─�
 - Đang có cuộc gọi khác: 409 `CALL_BUSY` (mình bận) / `CALLEE_BUSY` (người kia bận).
 - `call` = `{ id, matchId, callerId, calleeId, type, status, isCaller, createdAt, answeredAt, endedAt, durationSeconds, ringSeconds }`.
 - Mở app từ thông báo đẩy / hiện thanh "đang gọi" (`OngoingCallBarHelper`): `GET /calls/active`.
+  Trả `{ call, partner: {id, displayName, avatarUrl}, iceServers }`; app chưa nối WebSocket có thể hỏi định kỳ API này để biết có cuộc gọi đến.
 
 ## Trang Home: kết quả mặc định & filter
 

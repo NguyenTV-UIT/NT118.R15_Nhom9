@@ -186,6 +186,18 @@ public class OtpVerificationActivity extends AppCompatActivity {
             return;
         }
 
+        if (FLOW_VERIFY_CURRENT_EMAIL.equals(flowType)) {
+            // Đổi email bước 2: POST /users/me/email/verify-otp -> emailChangeToken cho màn nhập email mới
+            com.datezone.app.api.ApiUi.send(this, R.id.btnVerify, true, "POST", "users/me/email/verify-otp",
+                    com.datezone.app.api.ApiUi.data("otp", otp), response -> {
+                        Intent intent = new Intent(OtpVerificationActivity.this, ChangeEmailActivity.class);
+                        intent.putExtra(ChangeEmailActivity.EXTRA_EMAIL_CHANGE_TOKEN,
+                                response.getJSONObject("data").getString("emailChangeToken"));
+                        startActivity(intent);
+                        finish();
+                    });
+            return;
+        }
         if (!FLOW_FORGOT_PASSWORD.equals(flowType)) {
             Toast.makeText(this, "Chức năng xác minh này chưa được máy chủ hỗ trợ.", Toast.LENGTH_LONG).show();
             return;
@@ -240,6 +252,17 @@ public class OtpVerificationActivity extends AppCompatActivity {
     }
 
     private void resendOtpCode() {
+        if (FLOW_VERIFY_CURRENT_EMAIL.equals(flowType)) {
+            com.datezone.app.api.ApiUi.send(this, R.id.tvResendOtp, true, "POST", "users/me/email/verify-current",
+                    com.datezone.app.api.ApiUi.data("email", email), response -> {
+                        resendAfter = response.getJSONObject("data").optInt("resendAfter", 30);
+                        resendAvailableAt = 0;
+                        for (EditText box : otpBoxes) box.setText("");
+                        otpBoxes[0].requestFocus();
+                        startResendTimer();
+                    });
+            return;
+        }
         if (!FLOW_FORGOT_PASSWORD.equals(flowType)) return;
         com.datezone.app.api.ApiUi.send(this, R.id.tvResendOtp, false, "POST", "auth/password/forgot",
                 com.datezone.app.api.ApiUi.data("email", email), response -> {

@@ -49,6 +49,7 @@
         app:layout_constraintTop_toBottomOf="@id/headerIntimacy">
 
         <LinearLayout
+            android:id="@+id/layoutIntimacyContent"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
@@ -88,6 +89,7 @@
                     android:orientation="vertical">
 
                     <TextView
+                        android:id="@+id/tvIntimacyCloseCount"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="2 người thân thiết"

@@ -33,6 +33,9 @@ public class ChatListActivity extends AppCompatActivity {
         int indicatorType; // 0: none, 1: red dot, 2: white ring
         int mySentCount;
         int partnerSentCount;
+        long matchId;          // > 0: tương hợp thật từ máy chủ
+        String photoUrl;
+        org.json.JSONObject user;
 
         public RecentMatchModel(String name, String age, int photoResId, String initial, int bgColor, int indicatorType, int mySentCount, int partnerSentCount) {
             this.name = name;
@@ -106,10 +109,124 @@ public class ChatListActivity extends AppCompatActivity {
             });
         }
 
-        initRecentMatchesData();
-        renderRecentMatchesList();
-        setupConversationClicks();
+        // Dữ liệu thật lấy ở onResume() (GET /chats); xoá các dòng mẫu trong layout
+        LinearLayout conversations = findViewById(R.id.layoutConversations);
+        if (conversations != null) conversations.removeAllViews();
+        if (badgeCloseFriends instanceof TextView) ((TextView) badgeCloseFriends).setText("♥ 0 thân thiết");
         setupBottomNavigation();
+    }
+
+    private static final long REFRESH_MS = 5000;
+    private final android.os.Handler refreshHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable refreshTask = new Runnable() {
+        @Override public void run() {
+            loadChats();
+            com.datezone.app.api.IncomingCalls.check(ChatListActivity.this);
+            refreshHandler.postDelayed(this, REFRESH_MS);
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshHandler.removeCallbacks(refreshTask);
+        refreshHandler.post(refreshTask);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        refreshHandler.removeCallbacks(refreshTask);
+    }
+
+    private String lastChatsJson = "";
+
+    /** GET /chats - danh sách cuộc trò chuyện + "Tương hợp gần đây" + số người thân thiết. */
+    private void loadChats() {
+        new com.datezone.app.api.ApiClient(this).request(this, "GET", "chats", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONArray items = response.getJSONArray("data");
+                String snapshot = items.toString();
+                if (snapshot.equals(lastChatsJson)) return; // không có gì mới -> khỏi vẽ lại
+                lastChatsJson = snapshot;
+                org.json.JSONObject meta = response.optJSONObject("meta");
+                TextView badge = findViewById(R.id.tvCloseFriendsBadge);
+                if (badge != null) badge.setText("♥ " + (meta == null ? 0 : meta.optInt("closeFriendsCount")) + " thân thiết");
+                renderConversations(items);
+                renderRecentFromServer(items);
+            }
+            @Override public void onError(String message) {
+                if (lastChatsJson.isEmpty()) android.widget.Toast.makeText(ChatListActivity.this, message, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void renderConversations(org.json.JSONArray items) throws org.json.JSONException {
+        LinearLayout list = findViewById(R.id.layoutConversations);
+        if (list == null) return;
+        list.removeAllViews();
+        int shown = 0;
+        for (int i = 0; i < items.length(); i++) {
+            org.json.JSONObject chat = items.getJSONObject(i);
+            org.json.JSONObject last = chat.optJSONObject("lastMessage");
+            if (last == null) continue; // chưa nhắn tin nào: chỉ nằm ở hàng "Tương hợp gần đây"
+            org.json.JSONObject user = chat.getJSONObject("user");
+            org.json.JSONObject intimacy = chat.optJSONObject("intimacy");
+            long matchId = chat.getLong("matchId");
+            String name = com.datezone.app.api.ChatUi.text(user, "displayName");
+            int unread = chat.optInt("unreadCount");
+
+            View row = getLayoutInflater().inflate(R.layout.item_chat_conversation, list, false);
+            com.datezone.app.api.ChatUi.bindAvatar(row.findViewById(R.id.ivConvAvatar), row.findViewById(R.id.tvConvAvatarLetter),
+                    com.datezone.app.api.ChatUi.avatar(user), name);
+            row.findViewById(R.id.ivConvHeart).setVisibility(intimacy != null && intimacy.optBoolean("isCloseFriend") ? View.VISIBLE : View.GONE);
+            ((TextView) row.findViewById(R.id.tvConvName)).setText(name);
+            TextView preview = row.findViewById(R.id.tvConvPreview);
+            preview.setText((last.optBoolean("fromMe") ? "Bạn: " : "") + com.datezone.app.api.ChatUi.text(last, "preview"));
+            preview.setTypeface(null, unread > 0 ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+            ((TextView) row.findViewById(R.id.tvConvTime)).setText(com.datezone.app.api.ChatUi.timeLabel(last.optString("createdAt")));
+            TextView badge = row.findViewById(R.id.tvConvUnread);
+            badge.setVisibility(unread > 0 ? View.VISIBLE : View.GONE);
+            badge.setText(unread > 9 ? "9+" : String.valueOf(unread));
+            row.setOnClickListener(v -> startActivity(com.datezone.app.api.ChatUi.chatIntent(ChatListActivity.this, matchId, user)));
+            list.addView(row);
+            shown++;
+        }
+        if (shown == 0) {
+            TextView empty = new TextView(this);
+            empty.setText(items.length() == 0
+                    ? "Chưa có tương hợp nào. Hãy thích thêm vài người ở tab Khám phá nhé!"
+                    : "Chưa có tin nhắn. Chạm vào một tương hợp ở trên để gửi lời chào!");
+            empty.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+            empty.setTextSize(14f);
+            empty.setGravity(Gravity.CENTER);
+            int pad = (int) (24 * getResources().getDisplayMetrics().density);
+            empty.setPadding(pad, pad, pad, pad);
+            list.addView(empty);
+        }
+    }
+
+    /** 5 tương hợp mới nhất (theo matchedAt) cho hàng "Tương hợp gần đây". */
+    private void renderRecentFromServer(org.json.JSONArray items) throws org.json.JSONException {
+        List<org.json.JSONObject> sorted = new ArrayList<>();
+        for (int i = 0; i < items.length(); i++) sorted.add(items.getJSONObject(i));
+        java.util.Collections.sort(sorted, (a, b) -> b.optString("matchedAt").compareTo(a.optString("matchedAt")));
+        recentMatchesList.clear();
+        for (org.json.JSONObject chat : sorted) {
+            if (recentMatchesList.size() >= 5) break;
+            org.json.JSONObject user = chat.getJSONObject("user");
+            org.json.JSONObject intimacy = chat.optJSONObject("intimacy");
+            String name = com.datezone.app.api.ChatUi.text(user, "displayName");
+            int indicator = chat.optInt("unreadCount") > 0 ? 1 : chat.isNull("lastMessage") ? 2 : 0;
+            RecentMatchModel model = new RecentMatchModel(name, user.isNull("age") ? "" : String.valueOf(user.optInt("age")), 0,
+                    com.datezone.app.api.ChatUi.initial(name), com.datezone.app.api.ChatUi.colorFor(name), indicator,
+                    intimacy == null ? 0 : intimacy.optInt("mine"), intimacy == null ? 0 : intimacy.optInt("partner"));
+            model.matchId = chat.getLong("matchId");
+            model.photoUrl = com.datezone.app.api.ChatUi.avatar(user);
+            model.user = user;
+            recentMatchesList.add(model);
+        }
+        renderRecentMatchesList();
     }
 
     private void initRecentMatchesData() {
@@ -173,7 +290,17 @@ public class ChatListActivity extends AppCompatActivity {
                     FrameLayout.LayoutParams.MATCH_PARENT
             ));
 
-            if (match.photoResId != 0) {
+            if (match.photoUrl != null && !match.photoUrl.isEmpty()) {
+                // Ảnh thật từ máy chủ
+                ImageView ivRemote = new ImageView(this);
+                ivRemote.setLayoutParams(new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                ));
+                ivRemote.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                com.datezone.app.api.RemoteImages.load(ivRemote, match.photoUrl);
+                frameLayout.addView(ivRemote);
+            } else if (match.photoResId != 0) {
                 // Hiển thị ảnh bìa
                 ImageView ivPhoto = new ImageView(this);
                 ivPhoto.setLayoutParams(new FrameLayout.LayoutParams(
@@ -253,7 +380,9 @@ public class ChatListActivity extends AppCompatActivity {
             cardView.addView(frameLayout);
 
             // Bấm vào tương hợp gần đây -> Mở cuộc trò chuyện tương ứng (Giữ nguyên thẻ trong danh sách)
-            cardView.setOnClickListener(v -> openChatDetail(
+            if (match.matchId > 0) cardView.setOnClickListener(v ->
+                    startActivity(com.datezone.app.api.ChatUi.chatIntent(ChatListActivity.this, match.matchId, match.user)));
+            else cardView.setOnClickListener(v -> openChatDetail(
                     match.name,
                     match.age,
                     match.photoResId,

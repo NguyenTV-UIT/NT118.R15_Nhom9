@@ -55,6 +55,126 @@ public class SettingsActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         updateSavedEmailDisplay();
+        loadSettings();
+        loadSessions();
+    }
+
+    private boolean bindingSwitches;
+    private long otherSessionId;
+
+    private com.datezone.app.api.ApiClient api() {
+        return new com.datezone.app.api.ApiClient(this);
+    }
+
+    /** GET /users/me/settings - email (che), lần đổi mật khẩu, 3 công tắc. */
+    private void loadSettings() {
+        api().request(this, "GET", "users/me/settings", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                applySettings(response.getJSONObject("data"));
+            }
+            @Override public void onError(String message) {
+                Toast.makeText(SettingsActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void applySettings(org.json.JSONObject data) {
+        android.widget.TextView tvEmail = findViewById(R.id.tvSettingsEmailValue);
+        String masked = com.datezone.app.api.ChatUi.text(data, "emailMasked");
+        if (tvEmail != null && !masked.isEmpty()) tvEmail.setText(masked);
+        android.widget.TextView tvPassword = findViewById(R.id.tvSettingsPasswordChanged);
+        java.util.Date changed = com.datezone.app.api.ChatUi.parseTime(data.optString("passwordChangedAt"));
+        if (tvPassword != null && changed != null) tvPassword.setText("Đổi lần cuối " + ago(changed));
+        bindingSwitches = true;
+        setSwitch(R.id.switchPushNotification, data.optBoolean("pushEnabled", true));
+        setSwitch(R.id.switchOnlineStatus, data.optBoolean("showActiveStatus", true));
+        setSwitch(R.id.switchShowDistance, data.optBoolean("showDistance", true));
+        bindingSwitches = false;
+    }
+
+    private void setSwitch(int id, boolean checked) {
+        android.widget.CompoundButton button = findViewById(id);
+        if (button != null) button.setChecked(checked);
+    }
+
+    /** PUT /users/me/settings - đổi 1 công tắc; lỗi thì trả công tắc về trạng thái trên máy chủ. */
+    private void bindSwitch(int id, String key) {
+        android.widget.CompoundButton button = findViewById(id);
+        if (button == null) return;
+        button.setOnCheckedChangeListener((view, checked) -> {
+            if (bindingSwitches) return;
+            api().request(this, "PUT", "users/me/settings", com.datezone.app.api.ApiUi.data(key, checked),
+                    new com.datezone.app.api.ApiClient.Callback() {
+                        @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                            applySettings(response.getJSONObject("data"));
+                        }
+                        @Override public void onError(String message) {
+                            Toast.makeText(SettingsActivity.this, message, Toast.LENGTH_LONG).show();
+                            loadSettings();
+                        }
+                    });
+        });
+    }
+
+    private static String ago(java.util.Date date) {
+        long minutes = Math.max(0, (System.currentTimeMillis() - date.getTime()) / 60000);
+        if (minutes < 1) return "vừa xong";
+        if (minutes < 60) return minutes + " phút trước";
+        if (minutes < 24 * 60) return (minutes / 60) + " giờ trước";
+        long days = minutes / (24 * 60);
+        if (days < 30) return days + " ngày trước";
+        if (days < 365) return (days / 30) + " tháng trước";
+        return (days / 365) + " năm trước";
+    }
+
+    /** GET /users/me/sessions - thiết bị này + 1 thiết bị khác gần nhất (nếu có). */
+    private void loadSessions() {
+        api().request(this, "GET", "users/me/sessions", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONArray sessions = response.getJSONArray("data");
+                org.json.JSONObject current = null, other = null;
+                int others = 0;
+                for (int i = 0; i < sessions.length(); i++) {
+                    org.json.JSONObject session = sessions.getJSONObject(i);
+                    if (session.optBoolean("current")) current = session;
+                    else {
+                        if (other == null) other = session;
+                        others++;
+                    }
+                }
+                if (current != null) {
+                    setText(R.id.tvSettingsCurrentDeviceName, com.datezone.app.api.ChatUi.text(current, "deviceName"));
+                    setText(R.id.tvSettingsCurrentDeviceInfo, sessionInfo(current, 0));
+                }
+                otherSessionId = other == null ? 0 : other.optLong("id");
+                int visibility = other == null ? View.GONE : View.VISIBLE;
+                View layoutDevice = findViewById(R.id.layoutDeviceChromeWindows);
+                View dividerDevice = findViewById(R.id.dividerDeviceChromeWindows);
+                View logoutAll = findViewById(R.id.btnSettingsLogoutAllOtherDevices);
+                if (layoutDevice != null) layoutDevice.setVisibility(visibility);
+                if (dividerDevice != null) dividerDevice.setVisibility(visibility);
+                if (logoutAll != null) logoutAll.setVisibility(visibility);
+                if (other != null) {
+                    setText(R.id.tvSettingsOtherDeviceName, com.datezone.app.api.ChatUi.text(other, "deviceName"));
+                    setText(R.id.tvSettingsOtherDeviceInfo, sessionInfo(other, others - 1));
+                }
+            }
+            @Override public void onError(String message) { }
+        });
+    }
+
+    private void setText(int id, String text) {
+        android.widget.TextView view = findViewById(id);
+        if (view != null) view.setText(text);
+    }
+
+    private static String sessionInfo(org.json.JSONObject session, int more) {
+        String location = com.datezone.app.api.ChatUi.text(session, "location");
+        java.util.Date active = com.datezone.app.api.ChatUi.parseTime(session.optString("lastActiveAt"));
+        String when = session.optBoolean("active") || session.optBoolean("current") ? "Đang hoạt động"
+                : active == null ? "" : ago(active);
+        String info = location.isEmpty() ? when : when.isEmpty() ? location : location + " · " + when;
+        return more > 0 ? info + " (+" + more + " thiết bị khác)" : info;
     }
 
     private void updateSavedEmailDisplay() {
@@ -69,6 +189,11 @@ public class SettingsActivity extends AppCompatActivity {
     private void setupListeners() {
         // Nút Back
         findViewById(R.id.btnSettingsBack).setOnClickListener(v -> finish());
+
+        // 3 công tắc lưu thẳng lên máy chủ
+        bindSwitch(R.id.switchPushNotification, "pushEnabled");
+        bindSwitch(R.id.switchOnlineStatus, "showActiveStatus");
+        bindSwitch(R.id.switchShowDistance, "showDistance");
 
         // Sửa Email -> Mở màn hình VerifyCurrentEmailActivity
         View rowEditEmail = findViewById(R.id.rowSettingsEditEmail);
@@ -148,16 +273,18 @@ public class SettingsActivity extends AppCompatActivity {
 
         dialogView.findViewById(R.id.btnDialogConfirmLogoutDevice).setOnClickListener(v -> {
             dialog.dismiss();
-
-            // Ẩn thiết bị Chrome trên Windows khỏi danh sách trong trang Cài đặt
-            View layoutDevice = findViewById(R.id.layoutDeviceChromeWindows);
-            View dividerDevice = findViewById(R.id.dividerDeviceChromeWindows);
-            if (layoutDevice != null) layoutDevice.setVisibility(View.GONE);
-            if (dividerDevice != null) dividerDevice.setVisibility(View.GONE);
-
-            // Bắn thông báo đẩy về thiết bị thành công
-            sendPushNotification("Bảo mật tài khoản", "Đã đăng xuất khỏi thiết bị Chrome trên Windows thành công!");
-            Toast.makeText(this, "🔔 Đã đăng xuất khỏi thiết bị Chrome trên Windows thành công!", Toast.LENGTH_LONG).show();
+            if (otherSessionId <= 0) return;
+            // DELETE /users/me/sessions/:id - đăng xuất thiết bị đó ngay lập tức
+            api().request(this, "DELETE", "users/me/sessions/" + otherSessionId, null, new com.datezone.app.api.ApiClient.Callback() {
+                @Override public void onSuccess(org.json.JSONObject response) {
+                    Toast.makeText(SettingsActivity.this, "Đã đăng xuất khỏi thiết bị", Toast.LENGTH_LONG).show();
+                    loadSessions();
+                }
+                @Override public void onError(String message) {
+                    Toast.makeText(SettingsActivity.this, message, Toast.LENGTH_LONG).show();
+                    loadSessions();
+                }
+            });
         });
 
         dialogView.findViewById(R.id.btnDialogCancelLogoutDevice).setOnClickListener(v -> dialog.dismiss());
@@ -177,16 +304,16 @@ public class SettingsActivity extends AppCompatActivity {
 
         dialogView.findViewById(R.id.btnDialogConfirmLogoutAllDevices).setOnClickListener(v -> {
             dialog.dismiss();
-
-            // Ẩn thiết bị phụ khỏi danh sách trong trang Cài đặt
-            View layoutDevice = findViewById(R.id.layoutDeviceChromeWindows);
-            View dividerDevice = findViewById(R.id.dividerDeviceChromeWindows);
-            if (layoutDevice != null) layoutDevice.setVisibility(View.GONE);
-            if (dividerDevice != null) dividerDevice.setVisibility(View.GONE);
-
-            // Bắn thông báo đẩy về thiết bị thành công
-            sendPushNotification("Bảo mật tài khoản", "Đã đăng xuất khỏi tất cả các thiết bị khác thành công!");
-            Toast.makeText(this, "🔔 Đã đăng xuất khỏi tất cả các thiết bị khác thành công!", Toast.LENGTH_LONG).show();
+            // DELETE /users/me/sessions - đăng xuất mọi thiết bị khác, giữ lại máy này
+            api().request(this, "DELETE", "users/me/sessions", null, new com.datezone.app.api.ApiClient.Callback() {
+                @Override public void onSuccess(org.json.JSONObject response) {
+                    Toast.makeText(SettingsActivity.this, response.optString("message", "Đã đăng xuất các thiết bị khác"), Toast.LENGTH_LONG).show();
+                    loadSessions();
+                }
+                @Override public void onError(String message) {
+                    Toast.makeText(SettingsActivity.this, message, Toast.LENGTH_LONG).show();
+                }
+            });
         });
 
         dialogView.findViewById(R.id.btnDialogCancelLogoutAllDevices).setOnClickListener(v -> dialog.dismiss());

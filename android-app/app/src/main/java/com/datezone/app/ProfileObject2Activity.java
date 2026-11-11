@@ -22,6 +22,8 @@ import java.util.ArrayList;
 
 public class ProfileObject2Activity extends AppCompatActivity {
     public static final String EXTRA_REMOTE_PROFILE = "remoteProfile";
+    /** true: chỉ xem hồ sơ (mở từ màn chat) - ẩn nút Thích / Bỏ qua. */
+    public static final String EXTRA_VIEW_ONLY = "viewOnly";
     private com.datezone.app.api.RemoteProfile remoteProfile;
 
     public static final String EXTRA_NAME = "EXTRA_NAME";
@@ -134,8 +136,10 @@ public class ProfileObject2Activity extends AppCompatActivity {
                     com.datezone.app.api.RemoteImages.load(views[i], i < remoteProfile.photos.length ? remoteProfile.photos[i] : null);
                     if (i > 0) views[i].setVisibility(i < remoteProfile.photos.length ? View.VISIBLE : View.GONE);
                 }
-                findViewById(R.id.btnBlockUser).setVisibility(View.GONE);
-                findViewById(R.id.btnReportUser).setVisibility(View.GONE);
+                if (intent.getBooleanExtra(EXTRA_VIEW_ONLY, false)) {
+                    if (btnPass != null) btnPass.setVisibility(View.GONE);
+                    if (btnLike != null) btnLike.setVisibility(View.GONE);
+                }
             } catch (Exception e) {
                 Toast.makeText(this, "Không đọc được hồ sơ", Toast.LENGTH_SHORT).show();
                 finish();
@@ -476,7 +480,15 @@ public class ProfileObject2Activity extends AppCompatActivity {
         if (btnConfirm != null) {
             btnConfirm.setOnClickListener(v -> {
                 bottomSheetDialog.dismiss();
-                showBlockSuccessDialog();
+                if (remoteProfile == null) { showBlockSuccessDialog(); return; }
+                // POST /users/:id/block - chặn thật trên máy chủ rồi mới báo thành công
+                new com.datezone.app.api.ApiClient(this).request(this, "POST", "users/" + remoteProfile.id + "/block", null,
+                        new com.datezone.app.api.ApiClient.Callback() {
+                            @Override public void onSuccess(org.json.JSONObject response) { showBlockSuccessDialog(); }
+                            @Override public void onError(String message) {
+                                Toast.makeText(ProfileObject2Activity.this, message, Toast.LENGTH_LONG).show();
+                            }
+                        });
             });
         }
 
@@ -505,6 +517,7 @@ public class ProfileObject2Activity extends AppCompatActivity {
     private void showReportUserDialog() {
         Intent intent = new Intent(ProfileObject2Activity.this, ReportUserActivity.class);
         intent.putExtra(ReportUserActivity.EXTRA_NAME, currentUserName);
+        if (remoteProfile != null) intent.putExtra(ReportUserActivity.EXTRA_USER_ID, remoteProfile.id);
         startActivity(intent);
     }
 }

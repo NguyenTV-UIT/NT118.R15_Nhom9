@@ -39,6 +39,29 @@ public class ChatDetailActivity extends AppCompatActivity {
     public static final String EXTRA_MY_SENT_COUNT = "EXTRA_MY_SENT_COUNT";
     public static final String EXTRA_PARTNER_SENT_COUNT = "EXTRA_PARTNER_SENT_COUNT";
     public static final String EXTRA_INITIAL_MSG_COUNT = "EXTRA_INITIAL_MSG_COUNT";
+    /** Có EXTRA_MATCH_ID (> 0) thì màn này dùng dữ liệu thật từ máy chủ, không thì chạy dữ liệu mẫu như cũ. */
+    public static final String EXTRA_MATCH_ID = "EXTRA_MATCH_ID";
+    public static final String EXTRA_PHOTO_URL = "EXTRA_PHOTO_URL";
+    public static final String EXTRA_PARTNER_ID = "EXTRA_PARTNER_ID";
+    private static final long POLL_INTERVAL_MS = 3000;
+
+    private long matchId;
+    private boolean remote;
+    private String targetPhotoUrl = "";
+    private org.json.JSONObject partnerJson;
+    private com.datezone.app.api.ApiClient api;
+    private long lastMessageId;
+    private boolean intimacyLoaded;
+    private boolean sending;
+    private boolean polling;
+    private final java.util.HashSet<Long> shownMessageIds = new java.util.HashSet<>();
+    private final Handler pollHandler = new Handler(Looper.getMainLooper());
+    private final Runnable pollTask = new Runnable() {
+        @Override public void run() {
+            pollNewMessages();
+            pollHandler.postDelayed(this, POLL_INTERVAL_MS);
+        }
+    };
 
     private String targetName = "Grace";
     private String targetAge = "26";
@@ -153,6 +176,20 @@ public class ChatDetailActivity extends AppCompatActivity {
             }
         }
 
+        matchId = intent != null ? intent.getLongExtra(EXTRA_MATCH_ID, 0) : 0;
+        remote = matchId > 0;
+        if (remote) {
+            api = new com.datezone.app.api.ApiClient(this);
+            String url = intent.getStringExtra(EXTRA_PHOTO_URL);
+            targetPhotoUrl = url == null ? "" : url;
+            targetPhotoResId = 0;
+            if (!intent.hasExtra(EXTRA_NAME)) targetName = "";
+            if (!intent.hasExtra(EXTRA_AGE)) targetAge = "";
+            // Số tin thật lấy từ máy chủ ở loadChat()
+            mySentCount = 0;
+            partnerSentCount = 0;
+        }
+
         int intimacyScore = Math.min(mySentCount, partnerSentCount);
         if (intimacyScore >= 10) isPhotoUnlockedDialogShown = true;
         if (intimacyScore >= 20) isIntimacyCompletedDialogShown = true;
@@ -169,9 +206,196 @@ public class ChatDetailActivity extends AppCompatActivity {
 
         initViews();
         setupPartnerHeader();
-        setupSampleMessages();
+        if (remote) {
+            if (layoutMessagesList != null) layoutMessagesList.removeAllViews();
+            loadChat();
+        } else {
+            setupSampleMessages();
+        }
         updateIntimacyUI();
         setupListeners();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (remote && polling) {
+            pollHandler.removeCallbacks(pollTask);
+            pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        pollHandler.removeCallbacks(pollTask);
+    }
+
+    // ═══════════════ DỮ LIỆU THẬT TỪ MÁY CHỦ ═══════════════
+
+    /** GET /chats/:matchId - người kia + độ thân thiết, sau đó tải tin nhắn. */
+    private void loadChat() {
+        api.request(this, "GET", "chats/" + matchId, null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONObject data = response.getJSONObject("data");
+                partnerJson = data.getJSONObject("user");
+                targetName = com.datezone.app.api.ChatUi.text(partnerJson, "displayName");
+                targetAge = partnerJson.isNull("age") ? "" : String.valueOf(partnerJson.optInt("age"));
+                targetPhotoUrl = com.datezone.app.api.ChatUi.avatar(partnerJson);
+                setupPartnerHeader();
+                applyIntimacy(data.optJSONObject("intimacy"));
+                loadMessages();
+            }
+            @Override public void onError(String message) {
+                Toast.makeText(ChatDetailActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** GET /chats/:matchId/messages - trang tin nhắn mới nhất (cũ -> mới). */
+    private void loadMessages() {
+        api.request(this, "GET", "chats/" + matchId + "/messages?limit=50", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONArray items = response.getJSONArray("data");
+                boolean hasIncoming = false;
+                for (int i = 0; i < items.length(); i++) hasIncoming |= showMessage(items.getJSONObject(i));
+                if (items.length() == 0) addSystemNoticePill("Hai bạn đã tương hợp. Hãy gửi lời chào đầu tiên!");
+                if (hasIncoming) markRead();
+                polling = true;
+                pollHandler.removeCallbacks(pollTask);
+                pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+            }
+            @Override public void onError(String message) {
+                Toast.makeText(ChatDetailActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** Cứ 3 giây hỏi máy chủ tin mới hơn tin cuối đang hiển thị (GET ...?after=<id>). */
+    private void pollNewMessages() {
+        if (!remote || isFinishing()) return;
+        com.datezone.app.api.IncomingCalls.check(this);
+        api.request(this, "GET", "chats/" + matchId + "/messages?limit=50&after=" + lastMessageId, null,
+                new com.datezone.app.api.ApiClient.Callback() {
+                    @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                        org.json.JSONArray items = response.getJSONArray("data");
+                        boolean hasIncoming = false;
+                        for (int i = 0; i < items.length(); i++) hasIncoming |= showMessage(items.getJSONObject(i));
+                        if (hasIncoming) markRead();
+                        org.json.JSONObject meta = response.optJSONObject("meta");
+                        if (meta != null) applyIntimacy(meta.optJSONObject("intimacy"));
+                    }
+                    @Override public void onError(String message) {
+                        // Mất mạng tạm thời: lần hỏi sau sẽ lấy bù, không làm phiền người dùng.
+                    }
+                });
+    }
+
+    private void markRead() {
+        api.request(this, "POST", "chats/" + matchId + "/read", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) { }
+            @Override public void onError(String message) { }
+        });
+    }
+
+    /** Hiển thị 1 tin nhắn từ máy chủ (bỏ qua nếu đã hiển thị). Trả về true nếu là tin của người kia. */
+    private boolean showMessage(org.json.JSONObject message) {
+        long id = message.optLong("id");
+        if (id <= 0 || !shownMessageIds.add(id)) return false;
+        if (id > lastMessageId) lastMessageId = id;
+        boolean fromMe = message.optBoolean("fromMe");
+        String type = message.optString("type", "text");
+        if ("image".equals(type)) {
+            addRemotePhoto(com.datezone.app.api.ChatUi.text(message, "imageUrl"), fromMe);
+        } else if ("call".equals(type)) {
+            org.json.JSONObject call = message.optJSONObject("call");
+            int seconds = call == null ? 0 : call.optInt("durationSeconds");
+            String label = com.datezone.app.api.ChatUi.text(message, "preview");
+            if (seconds > 0) label += String.format(java.util.Locale.US, " · %02d:%02d", seconds / 60, seconds % 60);
+            addSystemNoticePill("📞 " + label);
+        } else if (fromMe) {
+            addSentBubble(com.datezone.app.api.ChatUi.text(message, "content"));
+        } else {
+            addReceivedBubble(com.datezone.app.api.ChatUi.text(message, "content"));
+        }
+        return !fromMe;
+    }
+
+    /** Cập nhật bộ đếm từ máy chủ và hiện dialog chúc mừng khi vừa chạm mốc 10 / 20. */
+    private void applyIntimacy(org.json.JSONObject intimacy) {
+        if (intimacy == null) return;
+        mySentCount = intimacy.optInt("mine");
+        partnerSentCount = intimacy.optInt("partner");
+        if (!intimacyLoaded) {
+            intimacyLoaded = true;
+            int score = Math.min(mySentCount, partnerSentCount);
+            isPhotoUnlockedDialogShown = score >= 10;
+            isIntimacyCompletedDialogShown = score >= 20;
+            updateIntimacyUI();
+            return;
+        }
+        checkAndTriggerDialogs();
+    }
+
+    private void addRemotePhoto(String url, boolean fromMe) {
+        ImageView photoView = new ImageView(this);
+        photoView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(480, 320);
+        params.gravity = fromMe ? Gravity.END : Gravity.START;
+        params.setMargins(fromMe ? 100 : 0, 12, fromMe ? 0 : 100, 12);
+        photoView.setLayoutParams(params);
+        com.datezone.app.api.RemoteImages.load(photoView, url);
+        photoView.setOnClickListener(v -> {
+            Intent viewer = new Intent(ChatDetailActivity.this, PhotoViewerActivity.class);
+            viewer.putExtra(PhotoViewerActivity.EXTRA_PHOTO_URLS, new String[]{url});
+            startActivity(viewer);
+        });
+        layoutMessagesList.addView(photoView);
+        scrollToBottom();
+    }
+
+    private void sendRemoteText(String text) {
+        if (sending) return;
+        sending = true;
+        edtChatMessage.setText("");
+        org.json.JSONObject body = com.datezone.app.api.ApiUi.data("content", text, "clientId", java.util.UUID.randomUUID().toString());
+        api.request(this, "POST", "chats/" + matchId + "/messages", body, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                sending = false;
+                org.json.JSONObject data = response.getJSONObject("data");
+                showMessage(data.getJSONObject("message"));
+                applyIntimacy(data.optJSONObject("intimacy"));
+            }
+            @Override public void onError(String message) {
+                sending = false;
+                // Gửi lỗi: trả nội dung về ô nhập để người dùng thử lại
+                if (edtChatMessage.getText().length() == 0) edtChatMessage.setText(text);
+                Toast.makeText(ChatDetailActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void sendRemotePhoto(Uri uri) {
+        Toast.makeText(this, "Đang gửi ảnh…", Toast.LENGTH_SHORT).show();
+        api.uploadPhotoTo(this, "chats/" + matchId + "/photos", uri, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONObject data = response.getJSONObject("data");
+                showMessage(data.getJSONObject("message"));
+                applyIntimacy(data.optJSONObject("intimacy"));
+            }
+            @Override public void onError(String message) {
+                Toast.makeText(ChatDetailActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void startRemoteCall(boolean video) {
+        Intent call = new Intent(ChatDetailActivity.this, ChatCallActivity.class);
+        call.putExtra(ChatCallActivity.EXTRA_NAME, targetName);
+        call.putExtra(ChatCallActivity.EXTRA_IS_VIDEO_CALL, video);
+        call.putExtra(ChatCallActivity.EXTRA_MATCH_ID, matchId);
+        call.putExtra(ChatCallActivity.EXTRA_PHOTO_URL, targetPhotoUrl);
+        startActivity(call);
     }
 
     private void initViews() {
@@ -210,7 +434,12 @@ public class ChatDetailActivity extends AppCompatActivity {
 
     private void setupPartnerHeader() {
         if (tvChatPartnerName != null) {
-            tvChatPartnerName.setText(targetName + ", " + targetAge);
+            tvChatPartnerName.setText(targetAge == null || targetAge.isEmpty() ? targetName : targetName + ", " + targetAge);
+        }
+        if (remote) {
+            if (tvChatAvatarLetter != null) tvChatAvatarLetter.setBackgroundResource(R.drawable.bg_circle_avatar_grace);
+            com.datezone.app.api.ChatUi.bindAvatar(ivChatAvatar, tvChatAvatarLetter, targetPhotoUrl, targetName);
+            return;
         }
 
         if (targetPhotoResId != 0) {
@@ -372,7 +601,9 @@ public class ChatDetailActivity extends AppCompatActivity {
         // Nút Gọi thoại -> Mở ChatCallActivity (Voice Call)
         View.OnClickListener voiceCallListener = v -> {
             int intimacyScore = Math.min(mySentCount, partnerSentCount);
-            if (intimacyScore >= 20) {
+            if (intimacyScore >= 20 && remote) {
+                startRemoteCall(false);
+            } else if (intimacyScore >= 20) {
                 Intent intent = new Intent(ChatDetailActivity.this, ChatCallActivity.class);
                 intent.putExtra(ChatCallActivity.EXTRA_NAME, targetName);
                 intent.putExtra(ChatCallActivity.EXTRA_PHOTO_RES_ID, targetPhotoResId != 0 ? targetPhotoResId : R.drawable.discovery_photo_1);
@@ -388,7 +619,9 @@ public class ChatDetailActivity extends AppCompatActivity {
         // Nút Gọi Video -> Mở ChatCallActivity (Video Call)
         View.OnClickListener videoCallListener = v -> {
             int intimacyScore = Math.min(mySentCount, partnerSentCount);
-            if (intimacyScore >= 20) {
+            if (intimacyScore >= 20 && remote) {
+                startRemoteCall(true);
+            } else if (intimacyScore >= 20) {
                 Intent intent = new Intent(ChatDetailActivity.this, ChatCallActivity.class);
                 intent.putExtra(ChatCallActivity.EXTRA_NAME, targetName);
                 intent.putExtra(ChatCallActivity.EXTRA_PHOTO_RES_ID, targetPhotoResId != 0 ? targetPhotoResId : R.drawable.discovery_photo_1);
@@ -530,6 +763,7 @@ public class ChatDetailActivity extends AppCompatActivity {
     private void sendTextMessage() {
         String text = edtChatMessage.getText().toString().trim();
         if (TextUtils.isEmpty(text)) return;
+        if (remote) { sendRemoteText(text); return; }
 
         addSentBubble(text);
         edtChatMessage.setText("");
@@ -567,6 +801,7 @@ public class ChatDetailActivity extends AppCompatActivity {
     }
 
     private void sendPhotoOrVideoMessage(Uri mediaUri) {
+        if (remote) { sendRemotePhoto(mediaUri); return; }
         String type = getContentResolver().getType(mediaUri);
         boolean isVideo = type != null && type.startsWith("video");
 
@@ -620,6 +855,14 @@ public class ChatDetailActivity extends AppCompatActivity {
     }
 
     private void openPartnerProfile() {
+        if (remote) {
+            if (partnerJson == null) return;
+            Intent profile = new Intent(ChatDetailActivity.this, ProfileObject2Activity.class);
+            profile.putExtra(ProfileObject2Activity.EXTRA_REMOTE_PROFILE, partnerJson.toString());
+            profile.putExtra(ProfileObject2Activity.EXTRA_VIEW_ONLY, true);
+            startActivity(profile);
+            return;
+        }
         Intent intent = new Intent(ChatDetailActivity.this, ProfileObjectActivity.class);
         intent.putExtra(ProfileObjectActivity.EXTRA_NAME, targetName);
         intent.putExtra(ProfileObjectActivity.EXTRA_AGE, targetAge + " tuổi");

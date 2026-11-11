@@ -17,6 +17,7 @@ const ApiError = require('../../utils/ApiError');
 const hub = require('../../realtime/hub');
 const push = require('../../services/push');
 const chats = require('./chats.service');
+const usersService = require('../users/users.service');
 
 const ACTIVE = ['ringing', 'accepted'];
 const OFFLINE_GRACE_MS = 20000; // mất kết nối quá lâu khi đang gọi -> tự kết thúc
@@ -105,6 +106,20 @@ async function finish(row, event) {
   return row;
 }
 
+/** Tên + ảnh đại diện để màn cuộc gọi hiển thị. */
+async function brief(userId) {
+  const [row] = await db.query(
+    `SELECT p.display_name, (SELECT ph.url FROM photos ph WHERE ph.user_id = p.user_id ORDER BY ph.position, ph.id LIMIT 1) AS avatar
+       FROM profiles p WHERE p.user_id = ?`,
+    [userId],
+  );
+  return {
+    id: Number(userId),
+    displayName: row?.display_name || null,
+    avatarUrl: row?.avatar ? usersService.toPhotoUrl(row.avatar) : null,
+  };
+}
+
 /** Hết thời gian đổ chuông mà chưa ai nhấc máy. */
 async function expire(callId) {
   const row = await transition(callId, 'ringing', 'missed');
@@ -155,16 +170,7 @@ async function start(userId, matchId, { type }) {
   const row = await getRow(ins.insertId);
   const callId = Number(row.id);
 
-  const [caller] = await db.query(
-    `SELECT p.display_name, (SELECT ph.url FROM photos ph WHERE ph.user_id = p.user_id ORDER BY ph.position, ph.id LIMIT 1) AS avatar
-       FROM profiles p WHERE p.user_id = ?`,
-    [userId],
-  );
-  const from = {
-    id: Number(userId),
-    displayName: caller?.display_name || null,
-    avatarUrl: caller?.avatar ? require('../users/users.service').toPhotoUrl(caller.avatar) : null,
-  };
+  const from = await brief(userId);
   const delivered = hub.sendToUser(calleeId, 'call.incoming', { call: toCall(row, calleeId), from, iceServers: env.iceServers });
   if (!delivered) {
     push.notify(calleeId, {
@@ -234,7 +240,8 @@ async function end(userId, callId) {
 
 /** GET /calls/:callId */
 async function get(userId, callId) {
-  return { call: toCall(await loadCall(userId, callId), userId) };
+  const row = await loadCall(userId, callId);
+  return { call: toCall(row, userId), partner: await brief(otherParty(row, userId)) };
 }
 
 /** GET /calls/active - cuộc gọi đang đổ chuông / đang diễn ra của mình (mở app từ thông báo đẩy, thanh "đang gọi"). */
@@ -244,7 +251,12 @@ async function getActive(userId) {
     'SELECT * FROM calls WHERE status IN (?) AND (caller_id = ? OR callee_id = ?) ORDER BY id DESC LIMIT 1',
     [ACTIVE, userId, userId],
   );
-  return { call: row ? toCall(row, userId) : null, iceServers: env.iceServers };
+  // partner: người ở đầu dây bên kia (để app hiện "X đang gọi cho bạn" khi chưa nối WebSocket)
+  return {
+    call: row ? toCall(row, userId) : null,
+    partner: row ? await brief(otherParty(row, userId)) : null,
+    iceServers: env.iceServers,
+  };
 }
 
 /** Kết thúc mọi cuộc gọi đang mở của 1 match (khi huỷ tương hợp / chặn). */

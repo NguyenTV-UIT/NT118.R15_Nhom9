@@ -53,7 +53,8 @@ public class MatchAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
         } else if (holder instanceof CardViewHolder) {
             CardViewHolder cardHolder = (CardViewHolder) holder;
             cardHolder.tvName.setText(item.getName());
-            cardHolder.ivPhoto.setImageResource(item.getPhotoResId());
+            if (item.getPhotoUrl() != null) com.datezone.app.api.RemoteImages.load(cardHolder.ivPhoto, item.getPhotoUrl());
+            else cardHolder.ivPhoto.setImageResource(item.getPhotoResId());
 
             cardHolder.itemView.setOnClickListener(v -> {
                 if (actionListener != null) {

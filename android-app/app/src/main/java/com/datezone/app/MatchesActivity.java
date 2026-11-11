@@ -72,9 +72,11 @@ public class MatchesActivity extends AppCompatActivity {
                 result -> {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         Intent data = result.getData();
-                        String name = data.getStringExtra(ProfileObject2Activity.EXTRA_NAME);
-                        if (name != null) {
-                            removeMatchByName(name);
+                        // Trang hồ sơ trả về hành động Thích / Bỏ qua -> gửi lên máy chủ
+                        int index = indexOfUser(data.getLongExtra("targetId", 0));
+                        if (index >= 0) {
+                            swipe(matchItemsList.get(index),
+                                    ProfileObject2Activity.ACTION_LIKE.equals(data.getStringExtra(ProfileObject2Activity.EXTRA_ACTION)));
                         }
                     }
                 }
@@ -86,62 +88,94 @@ public class MatchesActivity extends AppCompatActivity {
         setupBottomNavigation();
     }
 
+    private com.datezone.app.api.ApiClient api;
+    private boolean swiping;
+
     private void initMatchItemsData() {
         matchItemsList = new ArrayList<>();
+        api = new com.datezone.app.api.ApiClient(this);
+    }
 
-        // Section HÔM NAY
-        matchItemsList.add(new MatchItem("HÔM NAY"));
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadLikes();
+    }
 
-        // Thẻ 1: Nguyễn Minh Anh
-        matchItemsList.add(new MatchItem(
-                "Nguyễn Minh Anh", "25 tuổi",
-                "Chiều cao 165 cm  Cân nặng 55 kg  Giới tính Nữ", "Cách bạn 2,5 km",
-                R.drawable.discovery_photo_2,
-                new int[]{R.drawable.discovery_photo_2, R.drawable.discovery_photo_3, R.drawable.discovery_photo_1}
-        ));
+    /** GET /home/likes - những người đã thích mình mà mình chưa quẹt, chia nhóm Hôm nay / Hôm qua / Trước đó. */
+    private void loadLikes() {
+        api.request(this, "GET", "home/likes?limit=100", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONArray items = response.getJSONArray("data");
+                matchItemsList.clear();
+                String currentGroup = "";
+                for (int i = 0; i < items.length(); i++) {
+                    org.json.JSONObject user = items.getJSONObject(i);
+                    String group = user.optString("group", "earlier");
+                    if (!group.equals(currentGroup)) {
+                        currentGroup = group;
+                        matchItemsList.add(new MatchItem("today".equals(group) ? "HÔM NAY" : "yesterday".equals(group) ? "HÔM QUA" : "TRƯỚC ĐÓ"));
+                    }
+                    String name = com.datezone.app.api.ChatUi.text(user, "displayName");
+                    if (!user.isNull("age")) name += ", " + user.optInt("age");
+                    if (user.optBoolean("superlike")) name = "⭐ " + name;
+                    matchItemsList.add(new MatchItem(user.getLong("id"), name, com.datezone.app.api.ChatUi.avatar(user), user.toString()));
+                }
+                adapter.notifyDataSetChanged();
+                boolean empty = items.length() == 0;
+                if (rvMatchesList != null) rvMatchesList.setVisibility(empty ? View.GONE : View.VISIBLE);
+                if (layoutMatchesEmpty != null) layoutMatchesEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
+            }
+            @Override public void onError(String message) {
+                Toast.makeText(MatchesActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
 
-        // Thẻ 2: Trương Vĩnh Nguyên
-        matchItemsList.add(new MatchItem(
-                "Trương Vĩnh Nguyên", "20 tuổi",
-                "Chiều cao 170 cm  Cân nặng 65 kg  Giới tính Nam", "Cách bạn 1,2 km",
-                R.drawable.discovery_photo_1,
-                new int[]{R.drawable.discovery_photo_1, R.drawable.discovery_photo_2, R.drawable.discovery_photo_3}
-        ));
+    private int indexOfUser(long userId) {
+        for (int i = 0; i < matchItemsList.size(); i++) {
+            MatchItem item = matchItemsList.get(i);
+            if (item.getType() == MatchItem.TYPE_CARD && item.getUserId() == userId) return i;
+        }
+        return -1;
+    }
 
-        // Thẻ 3: Lê Hoàng Yến
-        matchItemsList.add(new MatchItem(
-                "Lê Hoàng Yến", "21 tuổi",
-                "Chiều cao 162 cm  Cân nặng 48 kg  Giới tính Nữ", "Cách bạn 0,8 km",
-                R.drawable.discovery_photo_5,
-                new int[]{R.drawable.discovery_photo_5, R.drawable.discovery_photo_2, R.drawable.discovery_photo_3}
-        ));
+    /** POST /home/swipe - thích lại (thành tương hợp ngay) hoặc bỏ qua 1 lượt thích. */
+    private void swipe(MatchItem item, boolean like) {
+        if (swiping) return;
+        swiping = true;
+        org.json.JSONObject body = com.datezone.app.api.ApiUi.data("targetId", item.getUserId(), "action", like ? "like" : "pass");
+        api.request(this, "POST", "home/swipe", body, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                swiping = false;
+                org.json.JSONObject data = response.getJSONObject("data");
+                removeMatchItemAt(indexOfUser(item.getUserId()));
+                if (!like) {
+                    Toast.makeText(MatchesActivity.this, "Đã bỏ qua Lượt thích", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (!data.optBoolean("matched")) return;
+                long matchId = data.optLong("matchId");
+                org.json.JSONObject user = data.optJSONObject("user");
+                String displayName = user == null ? item.getName() : com.datezone.app.api.ChatUi.text(user, "displayName");
+                new MatchSuccessDialog(MatchesActivity.this, displayName, item.getPhotoUrl() == null ? "" : item.getPhotoUrl(),
+                        new MatchSuccessDialog.OnMatchActionListener() {
+                            @Override
+                            public void onSayHello(String targetName) {
+                                startActivity(com.datezone.app.api.ChatUi.chatIntent(MatchesActivity.this, matchId, user));
+                            }
 
-        // Thẻ 4: Phạm Hoài Nam
-        matchItemsList.add(new MatchItem(
-                "Phạm Hoài Nam", "24 tuổi",
-                "Chiều cao 175 cm  Cân nặng 70 kg  Giới tính Nam", "Cách bạn 4,1 km",
-                R.drawable.discovery_photo_4,
-                new int[]{R.drawable.discovery_photo_4, R.drawable.discovery_photo_1, R.drawable.discovery_photo_5}
-        ));
-
-        // Section HÔM QUA
-        matchItemsList.add(new MatchItem("HÔM QUA"));
-
-        // Thẻ 5: Trần Ngọc Linh
-        matchItemsList.add(new MatchItem(
-                "Trần Ngọc Linh", "22 tuổi",
-                "Chiều cao 168 cm  Cân nặng 50 kg  Giới tính Nữ", "Cách bạn 3,8 km",
-                R.drawable.discovery_photo_3,
-                new int[]{R.drawable.discovery_photo_3, R.drawable.discovery_photo_4, R.drawable.discovery_photo_2}
-        ));
-
-        // Thẻ 6: Bạch Ngân
-        matchItemsList.add(new MatchItem(
-                "Bạch Ngân", "23 tuổi",
-                "Chiều cao 164 cm  Cân nặng 51 kg  Giới tính Nữ", "Cách bạn 1,5 km",
-                R.drawable.discovery_photo_2,
-                new int[]{R.drawable.discovery_photo_2, R.drawable.discovery_photo_5, R.drawable.discovery_photo_1}
-        ));
+                            @Override
+                            public void onContinue() {
+                                // Tiếp tục xem danh sách
+                            }
+                        }).show();
+            }
+            @Override public void onError(String message) {
+                swiping = false;
+                Toast.makeText(MatchesActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private void setupRecyclerView() {
@@ -163,48 +197,18 @@ public class MatchesActivity extends AppCompatActivity {
             public void onCardClick(MatchItem item) {
                 Intent intent = new Intent(MatchesActivity.this, ProfileObject2Activity.class);
                 intent.putExtra(ProfileObject2Activity.EXTRA_NAME, item.getName());
-                intent.putExtra(ProfileObject2Activity.EXTRA_AGE, item.getAge());
-                intent.putExtra(ProfileObject2Activity.EXTRA_DETAILS, item.getDetails());
-                intent.putExtra(ProfileObject2Activity.EXTRA_LOCATION, item.getDistance());
-                intent.putExtra(ProfileObject2Activity.EXTRA_PHOTOS, item.getPhotos());
-                if (profileLauncher != null) {
-                    profileLauncher.launch(intent);
-                } else {
-                    startActivity(intent);
-                }
+                intent.putExtra(ProfileObject2Activity.EXTRA_REMOTE_PROFILE, item.getRemoteJson());
+                profileLauncher.launch(intent);
             }
 
             @Override
             public void onPassClick(MatchItem item, int position) {
-                removeMatchItemAt(position);
-                Toast.makeText(MatchesActivity.this, "Đã bỏ qua Lượt thích", Toast.LENGTH_SHORT).show();
+                swipe(item, false);
             }
 
             @Override
             public void onLikeClick(MatchItem item, int position) {
-                removeMatchItemAt(position);
-
-                MatchSuccessDialog matchDialog = new MatchSuccessDialog(
-                        MatchesActivity.this,
-                        item.getName(),
-                        item.getPhotoResId(),
-                        new MatchSuccessDialog.OnMatchActionListener() {
-                            @Override
-                            public void onSayHello(String targetName) {
-                                Intent intent = new Intent(MatchesActivity.this, ChatDetailActivity.class);
-                                intent.putExtra(ChatDetailActivity.EXTRA_NAME, targetName);
-                                intent.putExtra(ChatDetailActivity.EXTRA_PHOTO_RES_ID, item.getPhotoResId());
-                                intent.putExtra(ChatDetailActivity.EXTRA_INITIAL_MSG_COUNT, 0);
-                                startActivity(intent);
-                            }
-
-                            @Override
-                            public void onContinue() {
-                                // Tiếp tục xem danh sách
-                            }
-                        }
-                );
-                matchDialog.show();
+                swipe(item, true);
             }
         });
 

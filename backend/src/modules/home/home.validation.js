@@ -32,7 +32,9 @@ const optionList = (key) =>
   z
     .union([z.string(), z.array(z.string())])
     .transform((v, ctx) => {
-      const parts = (Array.isArray(v) ? v : v.split(',')).map((x) => x.trim()).filter((x) => !ANY.has(options.norm(x)));
+      // Chuỗi đơn là 1 nhãn hợp lệ (kể cả nhãn có dấu phẩy như "Chưa xác định, cứ tìm hiểu trước") thì không tách
+      const list = Array.isArray(v) ? v : options.toCode(key, v) ? [v] : v.split(',');
+      const parts = list.map((x) => x.trim()).filter((x) => !ANY.has(options.norm(x)));
       const codes = [];
       for (const part of parts) {
         const code = options.toCode(key, part);

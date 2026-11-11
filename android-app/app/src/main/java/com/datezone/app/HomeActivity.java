@@ -48,6 +48,7 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private ApiClient api;
+    private long lastMatchId;
     private String searchQuery = "";
     private boolean loading;
     private ActivityResultLauncher<Intent> filtersLauncher;
@@ -422,6 +423,7 @@ public class HomeActivity extends AppCompatActivity {
         api.request(this, "POST", "home/swipe", body, new ApiClient.Callback() {
             @Override public void onSuccess(JSONObject response) throws Exception {
                 boolean matched = response.getJSONObject("data").getBoolean("matched");
+                lastMatchId = response.getJSONObject("data").optLong("matchId");
                 animateAcceptedSwipe(targetX, targetY, targetRotation, actionText, matched);
             }
             @Override public void onError(String message) {
@@ -467,6 +469,7 @@ public class HomeActivity extends AppCompatActivity {
                     if (matched) {
                         ProfileModel currentProfile = (currentProfileIndex < profileList.size()) ? profileList.get(currentProfileIndex) : null;
                         String matchedName = currentProfile != null ? currentProfile.name : "Đối tượng";
+                        long matchedId = lastMatchId;
                         int matchedPhoto = (currentProfile != null && currentProfile.photoResIds != null && currentProfile.photoResIds.length > 0) ? currentProfile.photoResIds[0] : R.drawable.discovery_photo_1;
 
                         MatchSuccessDialog matchDialog = new MatchSuccessDialog(
@@ -476,6 +479,10 @@ public class HomeActivity extends AppCompatActivity {
                                 new MatchSuccessDialog.OnMatchActionListener() {
                                     @Override
                                     public void onSayHello(String targetName) {
+                                        if (matchedId > 0 && currentProfile != null) {
+                                            startActivity(com.datezone.app.api.ChatUi.chatIntent(HomeActivity.this, matchedId, currentProfile.remote.json));
+                                            return;
+                                        }
                                         android.content.Intent intent = new android.content.Intent(HomeActivity.this, ChatDetailActivity.class);
                                         intent.putExtra(ChatDetailActivity.EXTRA_NAME, targetName);
                                         intent.putExtra(ChatDetailActivity.EXTRA_PHOTO_RES_ID, matchedPhoto);

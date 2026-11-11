@@ -139,18 +139,44 @@ public class FiltersActivity extends AppCompatActivity {
     }
 
     private void disableUnavailableFilters() {
-        // These fields are absent from the backend search contract.
+        // Hồ sơ trên máy chủ chưa có xu hướng tính dục / quận huyện nên 3 mục này vẫn tắt.
         setEnabledRecursively(groupOrientation, false);
         setEnabledRecursively(findViewById(R.id.btnFiltersLocation), false);
         setEnabledRecursively(findViewById(R.id.groupFiltersDistancePresets), false);
-        setEnabledRecursively(sliderHeight, false);
-        setEnabledRecursively(sliderWeight, false);
-        View[] rows = {rowFiltersRelationship, rowFiltersZodiac, rowFiltersSmoking,
-                rowFiltersDrinking, rowFiltersExercise, rowFiltersEducation};
-        TextView[] summaries = {tvRelationshipSummary, tvZodiacSummary, tvSmokingSummary,
-                tvDrinkingSummary, tvExerciseSummary, tvEducationSummary};
-        for (View row : rows) setEnabledRecursively(row, false);
-        for (TextView summary : summaries) if (summary != null) summary.setText("Sắp có");
+        trackAdvancedFilters();
+    }
+
+    // Bộ lọc nâng cao (chiều cao, cân nặng, mục tiêu, cung hoàng đạo, lối sống, học vấn) đã có trên máy chủ
+    // (GET /home/search). Chỉ gửi mục nào người dùng THỰC SỰ chạm vào, để giá trị mặc định của màn hình
+    // không âm thầm thu hẹp kết quả.
+    private boolean heightTouched, weightTouched;
+    private final java.util.HashSet<ChipGroup> touchedGroups = new java.util.HashSet<>();
+
+    private void trackAdvancedFilters() {
+        if (sliderHeight != null) sliderHeight.addOnChangeListener((slider, value, fromUser) -> { if (fromUser) heightTouched = true; });
+        if (sliderWeight != null) sliderWeight.addOnChangeListener((slider, value, fromUser) -> { if (fromUser) weightTouched = true; });
+        ChipGroup[] groups = {chipGroupFiltersRelationship, chipGroupFiltersZodiac, chipGroupFiltersSmoking,
+                chipGroupFiltersDrinking, chipGroupFiltersExercise, chipGroupFiltersEducation};
+        for (ChipGroup group : groups) {
+            if (group == null) continue;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                group.getChildAt(i).setOnTouchListener((view, event) -> {
+                    touchedGroups.add(group);
+                    return false; // không chặn thao tác bấm chip
+                });
+            }
+        }
+    }
+
+    /** Thêm các chip đang chọn của 1 nhóm vào query (lặp tham số: zodiac=Sư Tử&zodiac=Xử Nữ). Máy chủ nhận nhãn tiếng Việt. */
+    private void appendChips(Uri.Builder query, String key, ChipGroup group, Chip anyChip) {
+        if (group == null || !touchedGroups.contains(group)) return;
+        if (anyChip != null && anyChip.isChecked()) return;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof Chip && child != anyChip && ((Chip) child).isChecked())
+                query.appendQueryParameter(key, ((Chip) child).getText().toString());
+        }
     }
 
     private void setEnabledRecursively(View view, boolean enabled) {
@@ -223,6 +249,20 @@ public class FiltersActivity extends AppCompatActivity {
                 .appendQueryParameter("maxDistanceKm", String.valueOf(Math.round(sliderDistance.getValue())))
                 .appendQueryParameter("sort", "score").appendQueryParameter("limit", "20");
         if (!selectedInterestIds.isEmpty()) query.appendQueryParameter("interestIds", android.text.TextUtils.join(",", new java.util.TreeSet<>(selectedInterestIds)));
+        if (heightTouched && sliderHeight != null && sliderHeight.getValues().size() >= 2) {
+            query.appendQueryParameter("minHeight", String.valueOf(Math.round(sliderHeight.getValues().get(0))));
+            query.appendQueryParameter("maxHeight", String.valueOf(Math.round(sliderHeight.getValues().get(1))));
+        }
+        if (weightTouched && sliderWeight != null && sliderWeight.getValues().size() >= 2) {
+            query.appendQueryParameter("minWeight", String.valueOf(Math.round(sliderWeight.getValues().get(0))));
+            query.appendQueryParameter("maxWeight", String.valueOf(Math.round(sliderWeight.getValues().get(1))));
+        }
+        appendChips(query, "relationshipGoal", chipGroupFiltersRelationship, null);
+        appendChips(query, "zodiac", chipGroupFiltersZodiac, chipFiltersZodiacAny);
+        appendChips(query, "smoking", chipGroupFiltersSmoking, chipFiltersSmokingAny);
+        appendChips(query, "drinking", chipGroupFiltersDrinking, chipFiltersDrinkingAny);
+        appendChips(query, "exercise", chipGroupFiltersExercise, chipFiltersExerciseAny);
+        appendChips(query, "education", chipGroupFiltersEducation, chipFiltersEducationAny);
         return query.build().getEncodedQuery();
     }
 
@@ -581,6 +621,9 @@ public class FiltersActivity extends AppCompatActivity {
 
     private void resetFiltersToDefault() {
         selectedInterestIds.clear();
+        heightTouched = false;
+        weightTouched = false;
+        touchedGroups.clear();
         if (groupGender != null) {
             groupGender.check(R.id.btnFiltersWomen);
         }

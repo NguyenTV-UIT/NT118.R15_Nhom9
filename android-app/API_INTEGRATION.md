@@ -1,4 +1,4 @@
-# Tích hợp Android với backend v3
+# Tích hợp Android với backend v4
 
 ## Các luồng đã nối
 
@@ -79,11 +79,43 @@ trường khác không có trên form. Nếu đổi tên thành phố thủ côn
 cũ để tránh tìm kiếm theo vị trí không còn đúng. Lỗi request giữ form để thử lại;
 nếu thông tin cơ bản đã lưu nhưng sở thích lỗi, app thông báo phần chưa lưu.
 
-Danh sách lượt thích/tương hợp, chat, cuộc gọi, đổi email, xoá tài khoản và
-báo cáo/chặn chưa nối trong đợt này. Các bộ lọc chưa
-có trong hợp đồng tìm kiếm vẫn vô hiệu hóa. Search hỗ trợ giới tính, tuổi,
-khoảng cách, sở thích (tối đa 10); không ghi đè preferences đã lưu trên server.
-OTP cho đổi email chưa có API nên không mô phỏng xác thực thành công.
+## Đợt nối API v4 (lượt thích, chat, cuộc gọi, cài đặt, an toàn)
+
+Đợt này **chưa được build / chạy thử trên máy thật hay giả lập** (môi trường viết code không có Android SDK);
+mới kiểm tra cú pháp Java và XML. Trước khi merge cần build bằng Android Studio và chạy qua các luồng dưới đây.
+
+| Màn hình | API | Ghi chú |
+|---|---|---|
+| Lượt thích (`MatchesActivity`) | `GET /home/likes`, `POST /home/swipe` | Chia nhóm Hôm nay / Hôm qua / Trước đó theo `group`. Thích lại thành tương hợp → `MatchSuccessDialog` → mở chat thật |
+| Khám phá (`HomeActivity`) | `POST /home/swipe` | "Gửi lời chào" sau khi tương hợp mở chat thật bằng `matchId` |
+| Bộ lọc (`FiltersActivity`) | `GET /home/search` | Bật chiều cao, cân nặng, mục tiêu, cung hoàng đạo, hút thuốc, rượu bia, tập luyện, học vấn. Chỉ gửi mục người dùng đã chạm vào. Xu hướng tính dục, vị trí, mốc khoảng cách vẫn tắt |
+| Tin nhắn (`ChatListActivity`) | `GET /chats` | Tự làm mới 5 giây / lần. Dòng mẫu trong layout được thay bằng `item_chat_conversation.xml` |
+| Tìm kiếm chat (`ChatSearchActivity`) | `GET /chats` | Tải 1 lần, lọc theo tên trên máy (không phân biệt dấu) |
+| Chat (`ChatDetailActivity`) | `GET /chats/:id`, `GET/POST /chats/:id/messages`, `POST /chats/:id/photos`, `POST /chats/:id/read` | Dùng dữ liệu thật khi mở bằng `EXTRA_MATCH_ID` (`ChatUi.chatIntent`). Tin mới lấy bằng cách hỏi lại 3 giây / lần (`?after=`) |
+| Thân thiết (`ChatIntimacyActivity`) | `GET /chats/intimacy` | Thẻ dựng từ `item_intimacy_card.xml` |
+| Cuộc gọi (`ChatCallActivity`) | `POST /chats/:id/calls`, `GET /calls/:id`, `POST /calls/:id/end`, `GET /calls/active`, `POST /calls/:id/accept\|reject` | Xem giới hạn bên dưới |
+| Hồ sơ người khác (`ProfileObject2Activity`) | `POST /users/:id/block` | Hiện lại nút Chặn / Báo cáo cho hồ sơ từ máy chủ |
+| Báo cáo (`ReportUserActivity`) | `POST /users/:id/report` | Lý do lấy theo radio đang chọn |
+| Cài đặt (`SettingsActivity`) | `GET/PUT /users/me/settings`, `GET /users/me/sessions`, `DELETE /users/me/sessions[/:id]` | 3 công tắc lưu ngay; hiện thiết bị này + 1 thiết bị khác gần nhất |
+| Đổi email | `POST /users/me/email/verify-current` → `POST /users/me/email/verify-otp` → `PUT /users/me/email` | `VerifyCurrentEmailActivity` → `OtpVerificationActivity` → `ChangeEmailActivity` |
+| Xoá tài khoản (`DeleteAccountActivity`) | `DELETE /users/me` | Máy chủ kiểm tra chữ XÓA; thành công mới xoá phiên trên máy |
+
+Lớp dùng chung mới: `api/ChatUi` (avatar, giờ, mở chat), `api/IncomingCalls` (hỏi Nghe / Từ chối khi có cuộc gọi đến),
+`ApiClient.uploadPhotoTo(path, uri)`. Mọi request gửi kèm `X-Device-Name` / `X-Device-Platform` để màn
+"Thiết bị đang đăng nhập" hiện đúng tên máy.
+
+### Giới hạn còn lại
+
+- **Chưa có WebSocket**: app chưa có thư viện WebSocket nên chat và danh sách chat dùng cách hỏi lại định kỳ.
+  Tin nhắn tới chậm tối đa ~3 giây; chưa có "đang nhập" và trạng thái online tức thời.
+- **Cuộc gọi chưa có âm thanh / hình ảnh thật**: app mới đăng ký cuộc gọi với máy chủ (đổ chuông, nhấc máy,
+  từ chối, kết thúc, gọi nhỡ, nhật ký trong chat). Muốn nghe / thấy nhau cần thêm thư viện WebRTC và trao đổi
+  gói qua WebSocket (`call.signal`). Cuộc gọi đến chỉ được phát hiện khi đang mở màn Tin nhắn hoặc màn chat.
+- **Thông báo đẩy** (FCM) chưa nối: chưa gọi `POST /users/me/device-token`.
+- Màn Cài đặt chỉ hiện 1 thiết bị khác (layout có sẵn 1 dòng); các thiết bị còn lại ghi dạng "+N thiết bị khác".
+- Mở lại màn Bộ lọc không khôi phục các lựa chọn nâng cao đã áp dụng lần trước.
+- Đổi email khi máy chủ bật `EMAIL_CHANGE_VERIFY_NEW=true` (OTP gửi tới email mới) chưa có màn tương ứng.
+- Hồ sơ mở từ màn chat dùng `ProfileObject2Activity` ở chế độ chỉ xem (ẩn nút Thích / Bỏ qua).
 
 ## Kiểm tra
 

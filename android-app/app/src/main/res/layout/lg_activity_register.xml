@@ -34,19 +34,6 @@
                 style="@style/AuthCardSubtitle"
                 android:text="Đăng ký để bắt đầu kết nối với mọi người quanh bạn" />
 
-            <!-- Field 1: Họ và tên -->
-            <TextView
-                style="@style/AuthFieldLabel"
-                android:layout_marginTop="20dp"
-                android:labelFor="@id/edtFullName"
-                android:text="Họ và tên" />
-
-            <EditText
-                android:id="@+id/edtFullName"
-                style="@style/AuthInputEditText"
-                android:hint="Nhập họ và tên"
-                android:inputType="textPersonName" />
-
             <!-- Field 2: Email -->
             <TextView
                 style="@style/AuthFieldLabel"

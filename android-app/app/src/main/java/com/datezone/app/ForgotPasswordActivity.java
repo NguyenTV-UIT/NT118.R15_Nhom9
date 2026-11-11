@@ -82,10 +82,13 @@ public class ForgotPasswordActivity extends AppCompatActivity {
             return;
         }
 
-        // Chuyển sang màn hình Xác thực OTP với flow Quên mật khẩu
-        Intent intent = new Intent(ForgotPasswordActivity.this, OtpVerificationActivity.class);
-        intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_FORGOT_PASSWORD);
-        intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, email);
-        startActivity(intent);
+        com.datezone.app.api.ApiUi.send(this, R.id.btnSendOtp, false, "POST", "auth/password/forgot",
+                com.datezone.app.api.ApiUi.data("email", email), response -> {
+                    Intent intent = new Intent(this, OtpVerificationActivity.class);
+                    intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_FORGOT_PASSWORD);
+                    intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, email);
+                    intent.putExtra("resendAfter", response.getJSONObject("data").optInt("resendAfter", 30));
+                    startActivity(intent);
+                });
     }
 }

@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.RadioButton;
@@ -78,6 +80,6 @@ public class GenderActivity extends AppCompatActivity {
         android.content.Intent intent = new android.content.Intent(GenderActivity.this, DatingPreferenceActivity.class);
         intent.putExtra("EXTRA_GENDER", selectedGender);
         intent.putExtra("EXTRA_SHOW_GENDER", isShowOnProfile);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("gender", selectedGender, "showGender", isShowOnProfile), intent);
     }
 }

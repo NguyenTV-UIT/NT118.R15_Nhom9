@@ -38,6 +38,9 @@ public class OtpVerificationActivity extends AppCompatActivity {
     private String email = "";
     private CountDownTimer countDownTimer;
     private boolean isResendClickable = false;
+    private int resendAfter = 30;
+    private long resendAvailableAt;
+    private String resetToken;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -115,6 +118,8 @@ public class OtpVerificationActivity extends AppCompatActivity {
             }
         });
 
+        resendAfter = getIntent().getIntExtra("resendAfter", 30);
+        if (savedInstanceState != null) resendAvailableAt = savedInstanceState.getLong("resendAvailableAt");
         startResendTimer();
     }
 
@@ -176,56 +181,29 @@ public class OtpVerificationActivity extends AppCompatActivity {
         }
 
         String otp = sb.toString();
-        if (otp.length() < 6) {
+        if (!otp.matches("\\d{6}")) {
             Toast.makeText(this, "Vui lòng nhập đủ 6 chữ số OTP", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        // Hiển thị dialog thông báo xác thực OTP thành công
-        OtpSuccessDialog dialog = new OtpSuccessDialog(
-                this,
-                "Mã OTP của bạn đã được xác minh thành công.",
-                () -> onOtpVerificationSuccess()
-        );
-        dialog.show();
+        if (!FLOW_FORGOT_PASSWORD.equals(flowType)) {
+            Toast.makeText(this, "Chức năng xác minh này chưa được máy chủ hỗ trợ.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        com.datezone.app.api.ApiUi.send(this, R.id.btnVerify, false, "POST", "auth/password/verify-otp",
+                com.datezone.app.api.ApiUi.data("email", email, "otp", otp), response -> {
+                    resetToken = response.getJSONObject("data").getString("resetToken");
+                    onOtpVerificationSuccess();
+                });
     }
 
     private void onOtpVerificationSuccess() {
-        if (FLOW_FORGOT_PASSWORD.equals(flowType)) {
+        if (FLOW_FORGOT_PASSWORD.equals(flowType) && resetToken != null) {
             // Sau khi bấm xác nhận từ Quên mật khẩu -> Mới hiện ra trang Đặt lại mật khẩu
             Intent intent = new Intent(OtpVerificationActivity.this, ResetPasswordActivity.class);
             intent.putExtra(EXTRA_EMAIL, email);
+            intent.putExtra(ResetPasswordActivity.EXTRA_RESET_TOKEN, resetToken);
             startActivity(intent);
-            finish();
-        } else if (FLOW_LOGIN.equals(flowType)) {
-            Toast.makeText(this, "Đăng nhập thành công!", Toast.LENGTH_LONG).show();
-            Intent intent = new Intent(OtpVerificationActivity.this, HomeActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-            finish();
-        } else if (FLOW_REGISTER.equals(flowType)) {
-            Toast.makeText(this, "Đăng ký thành công!", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(OtpVerificationActivity.this, EnterNameActivity.class);
-            intent.putExtra(EXTRA_EMAIL, email);
-            startActivity(intent);
-            finish();
-        } else if (FLOW_CHANGE_EMAIL.equals(flowType)) {
-            Intent intent = new Intent(OtpVerificationActivity.this, ChangeEmailSuccessActivity.class);
-            intent.putExtra(EXTRA_EMAIL, email);
-            startActivity(intent);
-            finish();
-        } else if (FLOW_VERIFY_CURRENT_EMAIL.equals(flowType)) {
-            Toast.makeText(this, "Xác minh email thành công!", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(OtpVerificationActivity.this, ChangeEmailActivity.class);
-            startActivity(intent);
-            finish();
-        } else if (FLOW_CHANGE_PASSWORD.equals(flowType)) {
-            Toast.makeText(this, "Xác minh OTP thành công!", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(OtpVerificationActivity.this, ResetPasswordActivity.class);
-            intent.putExtra(EXTRA_EMAIL, email);
-            startActivity(intent);
-            finish();
-        } else {
             finish();
         }
     }
@@ -242,7 +220,9 @@ public class OtpVerificationActivity extends AppCompatActivity {
         tvResendOtp.setTextColor(textSecondaryColor);
         tvResendOtp.setTypeface(null, android.graphics.Typeface.NORMAL);
 
-        countDownTimer = new CountDownTimer(30000, 1000) {
+        if (resendAvailableAt == 0) resendAvailableAt = System.currentTimeMillis() + resendAfter * 1000L;
+        long remaining = Math.max(0, resendAvailableAt - System.currentTimeMillis());
+        countDownTimer = new CountDownTimer(remaining, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
                 long seconds = millisUntilFinished / 1000;
@@ -260,12 +240,20 @@ public class OtpVerificationActivity extends AppCompatActivity {
     }
 
     private void resendOtpCode() {
-        Toast.makeText(this, "Đã gửi lại mã OTP mới tới email " + maskEmail(email), Toast.LENGTH_SHORT).show();
-        for (EditText box : otpBoxes) {
-            box.setText("");
-        }
-        otpBoxes[0].requestFocus();
-        startResendTimer();
+        if (!FLOW_FORGOT_PASSWORD.equals(flowType)) return;
+        com.datezone.app.api.ApiUi.send(this, R.id.tvResendOtp, false, "POST", "auth/password/forgot",
+                com.datezone.app.api.ApiUi.data("email", email), response -> {
+                    resendAfter = response.getJSONObject("data").optInt("resendAfter", 30);
+                    resendAvailableAt = 0;
+                    for (EditText box : otpBoxes) box.setText("");
+                    otpBoxes[0].requestFocus();
+                    startResendTimer();
+                });
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putLong("resendAvailableAt", resendAvailableAt);
+        super.onSaveInstanceState(state);
     }
 
     @Override

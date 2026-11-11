@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.content.Intent;
 import android.os.Bundle;
 import android.text.Editable;
@@ -89,6 +91,6 @@ public class BioActivity extends AppCompatActivity {
         // Chuyển sang màn hình thông báo hồ sơ sẵn sàng lgf_activity_profile_ready
         Intent intent = new Intent(BioActivity.this, ProfileReadyActivity.class);
         intent.putExtra("EXTRA_BIO", bio);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("bio", bio), intent);
     }
 }

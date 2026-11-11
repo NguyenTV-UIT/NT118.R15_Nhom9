@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -156,7 +158,9 @@ public class BirthdayActivity extends AppCompatActivity {
             }
 
             Calendar birthDate = Calendar.getInstance();
+            birthDate.setLenient(false);
             birthDate.set(year, month - 1, day);
+            birthDate.getTime();
 
             Calendar today = Calendar.getInstance();
             int age = today.get(Calendar.YEAR) - birthDate.get(Calendar.YEAR);
@@ -193,7 +197,9 @@ public class BirthdayActivity extends AppCompatActivity {
             int year = Integer.parseInt(yearStr);
 
             Calendar birthDate = Calendar.getInstance();
+            birthDate.setLenient(false);
             birthDate.set(year, month - 1, day);
+            birthDate.getTime();
 
             Calendar today = Calendar.getInstance();
             int age = today.get(Calendar.YEAR) - birthDate.get(Calendar.YEAR);
@@ -209,7 +215,7 @@ public class BirthdayActivity extends AppCompatActivity {
             // Chuyển sang lg4_activity_gender
             android.content.Intent intent = new android.content.Intent(BirthdayActivity.this, GenderActivity.class);
             intent.putExtra("EXTRA_USER_AGE", age);
-            startActivity(intent);
+            ApiUi.saveProfile(this, ApiUi.data("birthday", String.format(java.util.Locale.ROOT, "%04d-%02d-%02d", year, month, day)), intent);
 
         } catch (Exception e) {
             Toast.makeText(this, "Ngày sinh không hợp lệ", Toast.LENGTH_SHORT).show();

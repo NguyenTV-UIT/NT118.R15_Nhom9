@@ -13,7 +13,6 @@ import androidx.core.view.WindowInsetsCompat;
 
 public class RegisterActivity extends AppCompatActivity {
 
-    private EditText edtFullName;
     private EditText edtEmail;
     private EditText edtPassword;
     private EditText edtConfirmPassword;
@@ -53,7 +52,6 @@ public class RegisterActivity extends AppCompatActivity {
             ViewCompat.requestApplyInsets(root);
         }
 
-        edtFullName = findViewById(R.id.edtFullName);
         edtEmail = findViewById(R.id.edtEmail);
         edtPassword = findViewById(R.id.edtPassword);
         edtConfirmPassword = findViewById(R.id.edtConfirmPassword);
@@ -64,15 +62,9 @@ public class RegisterActivity extends AppCompatActivity {
     }
 
     private void checkRegisterInput() {
-        String fullName = edtFullName.getText().toString().trim();
         String email = edtEmail.getText().toString().trim();
         String password = edtPassword.getText().toString();
         String confirmPassword = edtConfirmPassword.getText().toString();
-
-        if (fullName.isEmpty()) {
-            showError(edtFullName, "Vui lòng nhập họ và tên");
-            return;
-        }
 
         if (email.isEmpty()) {
             showError(edtEmail, "Vui lòng nhập địa chỉ email");
@@ -84,8 +76,8 @@ public class RegisterActivity extends AppCompatActivity {
             return;
         }
 
-        if (password.length() < 8) {
-            showError(edtPassword, "Mật khẩu cần ít nhất 8 ký tự");
+        if (password.length() < 8 || password.length() > 72) {
+            showError(edtPassword, "Mật khẩu cần từ 8 đến 72 ký tự");
             return;
         }
 
@@ -99,11 +91,9 @@ public class RegisterActivity extends AppCompatActivity {
             return;
         }
 
-        // Chuyển sang màn hình Xác thực OTP với flow Đăng ký
-        Intent intent = new Intent(RegisterActivity.this, OtpVerificationActivity.class);
-        intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_REGISTER);
-        intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, email);
-        startActivity(intent);
+        com.datezone.app.api.ApiUi.send(this, R.id.btnRegister, false, "POST", "auth/register",
+                com.datezone.app.api.ApiUi.data("email", email, "password", password),
+                response -> com.datezone.app.api.AuthFlow.signedIn(this, response));
     }
 
     private void showError(EditText input, String message) {

@@ -17,6 +17,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 public class ResetPasswordActivity extends AppCompatActivity {
+    public static final String EXTRA_RESET_TOKEN = "resetToken";
 
     private EditText edtNewPassword;
     private EditText edtConfirmPassword;
@@ -105,7 +106,7 @@ public class ResetPasswordActivity extends AppCompatActivity {
         String newPassword = edtNewPassword.getText().toString();
         String confirmPassword = edtConfirmPassword.getText().toString();
 
-        boolean isMinLength = newPassword.length() >= 8;
+        boolean isMinLength = newPassword.length() >= 8 && newPassword.length() <= 72;
         boolean isHasDigit = newPassword.matches(".*\\d.*");
         boolean isMatch = !newPassword.isEmpty() && newPassword.equals(confirmPassword);
 
@@ -136,17 +137,25 @@ public class ResetPasswordActivity extends AppCompatActivity {
             return;
         }
 
-        // Hiển thị Dialog thông báo Đặt lại mật khẩu thành công
-        ResetPasswordSuccessDialog dialog = new ResetPasswordSuccessDialog(
+        String token = getIntent().getStringExtra(EXTRA_RESET_TOKEN);
+        if (token == null || token.isEmpty()) {
+            Toast.makeText(this, "Vui lòng xác minh OTP qua Quên mật khẩu trước.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        com.datezone.app.api.ApiUi.send(this, R.id.btnResetPassword, false, "POST", "auth/password/reset",
+                com.datezone.app.api.ApiUi.data("resetToken", token, "newPassword", edtNewPassword.getText().toString()), response -> {
+            new com.datezone.app.api.SessionStore(this).clear();
+            ResetPasswordSuccessDialog dialog = new ResetPasswordSuccessDialog(
                 this,
                 () -> {
                     // Chuyển sang màn hình chính Discovery (discovery_activity_home)
-                    Intent intent = new Intent(ResetPasswordActivity.this, HomeActivity.class);
-                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    Intent intent = new Intent(ResetPasswordActivity.this, LoginActivity.class);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(intent);
                     finish();
                 }
         );
         dialog.show();
+        });
     }
 }

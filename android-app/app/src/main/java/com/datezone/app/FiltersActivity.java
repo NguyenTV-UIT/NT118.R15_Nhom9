@@ -1,6 +1,11 @@
 package com.datezone.app;
 
 import android.os.Bundle;
+import android.content.Intent;
+import android.net.Uri;
+import com.datezone.app.api.ApiClient;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -22,6 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class FiltersActivity extends AppCompatActivity {
+    public static final String EXTRA_SEARCH_QUERY = "discoverySearchQuery";
+    private final java.util.Set<String> selectedInterestIds = new java.util.HashSet<>();
 
     private MaterialButtonToggleGroup groupGender;
     private ChipGroup groupOrientation;
@@ -124,6 +131,104 @@ public class FiltersActivity extends AppCompatActivity {
         setupExpandableZodiac();
         setupExpandableLifestyleSections();
         setupActionButtons();
+        disableUnavailableFilters();
+        String query = savedInstanceState == null ? getIntent().getStringExtra(EXTRA_SEARCH_QUERY)
+                : savedInstanceState.getString(EXTRA_SEARCH_QUERY);
+        restoreSearchQuery(query);
+        loadInterests();
+    }
+
+    private void disableUnavailableFilters() {
+        // These fields are absent from the backend search contract.
+        setEnabledRecursively(groupOrientation, false);
+        setEnabledRecursively(findViewById(R.id.btnFiltersLocation), false);
+        setEnabledRecursively(findViewById(R.id.groupFiltersDistancePresets), false);
+        setEnabledRecursively(sliderHeight, false);
+        setEnabledRecursively(sliderWeight, false);
+        View[] rows = {rowFiltersRelationship, rowFiltersZodiac, rowFiltersSmoking,
+                rowFiltersDrinking, rowFiltersExercise, rowFiltersEducation};
+        TextView[] summaries = {tvRelationshipSummary, tvZodiacSummary, tvSmokingSummary,
+                tvDrinkingSummary, tvExerciseSummary, tvEducationSummary};
+        for (View row : rows) setEnabledRecursively(row, false);
+        for (TextView summary : summaries) if (summary != null) summary.setText("Sắp có");
+    }
+
+    private void setEnabledRecursively(View view, boolean enabled) {
+        if (view == null) return;
+        view.setEnabled(enabled);
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) setEnabledRecursively(group.getChildAt(i), enabled);
+        }
+        view.setAlpha(enabled ? 1f : 0.6f);
+    }
+
+    private void restoreSearchQuery(String query) {
+        if (query == null || query.isEmpty()) return;
+        Uri uri = Uri.parse("https://filters.local/?" + query);
+        String gender = uri.getQueryParameter("gender");
+        groupGender.check("male".equals(gender) ? R.id.btnFiltersMen : "everyone".equals(gender)
+                ? R.id.btnFiltersEveryone : R.id.btnFiltersWomen);
+        try {
+            sliderDistance.setValue(Float.parseFloat(uri.getQueryParameter("maxDistanceKm")));
+            sliderAge.setValues(Float.parseFloat(uri.getQueryParameter("minAge")), Float.parseFloat(uri.getQueryParameter("maxAge")));
+        } catch (Exception ignored) { /* Keep valid defaults if no previous query exists. */ }
+        String ids = uri.getQueryParameter("interestIds");
+        if (ids != null && !ids.isEmpty()) java.util.Collections.addAll(selectedInterestIds, ids.split(","));
+    }
+
+    private void loadInterests() {
+        chipGroupFiltersInterests.removeAllViews();
+        tvInterestsSummary.setText("Đang tải sở thích…");
+        new ApiClient(this).request(this, "GET", "users/interests", null, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                JSONArray interests = response.getJSONArray("data");
+                for (int i = 0; i < interests.length(); i++) {
+                    JSONObject interest = interests.getJSONObject(i);
+                    String id = interest.getString("id");
+                    Chip chip = (Chip) getLayoutInflater().inflate(R.layout.item_profile_interest_chip, chipGroupFiltersInterests, false);
+                    chip.setId(View.generateViewId());
+                    chip.setText(interest.getString("name"));
+                    chip.setCheckable(true);
+                    chip.setClickable(true);
+                    chip.setFocusable(true);
+                    chip.setTag(id);
+                    chip.setChecked(selectedInterestIds.contains(id));
+                    chip.setOnCheckedChangeListener((button, checked) -> {
+                        if (checked && selectedInterestIds.size() >= 10) {
+                            chip.setChecked(false);
+                            Toast.makeText(FiltersActivity.this, "Chọn tối đa 10 sở thích", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (checked) selectedInterestIds.add(id); else selectedInterestIds.remove(id);
+                        updateInterestsSummary();
+                    });
+                    chipGroupFiltersInterests.addView(chip);
+                }
+                updateInterestsSummary();
+            }
+            @Override public void onError(String message) {
+                tvInterestsSummary.setText("Chưa tải được sở thích");
+                Toast.makeText(FiltersActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private String buildSearchQuery() {
+        int selected = groupGender.getCheckedButtonId();
+        String gender = selected == R.id.btnFiltersMen ? "male" : selected == R.id.btnFiltersEveryone ? "everyone" : "female";
+        Uri.Builder query = new Uri.Builder().appendQueryParameter("gender", gender)
+                .appendQueryParameter("minAge", String.valueOf(Math.round(sliderAge.getValues().get(0))))
+                .appendQueryParameter("maxAge", String.valueOf(Math.round(sliderAge.getValues().get(1))))
+                .appendQueryParameter("maxDistanceKm", String.valueOf(Math.round(sliderDistance.getValue())))
+                .appendQueryParameter("sort", "score").appendQueryParameter("limit", "20");
+        if (!selectedInterestIds.isEmpty()) query.appendQueryParameter("interestIds", android.text.TextUtils.join(",", new java.util.TreeSet<>(selectedInterestIds)));
+        return query.build().getEncodedQuery();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putString(EXTRA_SEARCH_QUERY, buildSearchQuery());
+        super.onSaveInstanceState(state);
     }
 
     private void initViews() {
@@ -475,6 +580,7 @@ public class FiltersActivity extends AppCompatActivity {
     }
 
     private void resetFiltersToDefault() {
+        selectedInterestIds.clear();
         if (groupGender != null) {
             groupGender.check(R.id.btnFiltersWomen);
         }
@@ -541,6 +647,7 @@ public class FiltersActivity extends AppCompatActivity {
         resetSingleOrAnyGroup(chipGroupFiltersEducation, chipFiltersEducationAny, containerFiltersEducationExpanded, ivFiltersEducationArrow, tvEducationSummary);
 
         Toast.makeText(this, "Đã khôi phục bộ lọc về trạng thái ban đầu", Toast.LENGTH_SHORT).show();
+        disableUnavailableFilters();
     }
 
     private void resetSingleOrAnyGroup(ChipGroup group, Chip anyChip, LinearLayout container, ImageView arrow, TextView summaryTv) {
@@ -558,8 +665,7 @@ public class FiltersActivity extends AppCompatActivity {
     }
 
     private void applyAndSaveFilters() {
-        Toast.makeText(this, "Đã áp dụng bộ lọc tìm kiếm mới!", Toast.LENGTH_SHORT).show();
-        setResult(RESULT_OK);
+        setResult(RESULT_OK, new Intent().putExtra(EXTRA_SEARCH_QUERY, buildSearchQuery()));
         finish();
     }
 }

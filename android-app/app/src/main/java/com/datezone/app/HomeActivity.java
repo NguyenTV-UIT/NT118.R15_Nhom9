@@ -1,6 +1,14 @@
 package com.datezone.app;
 
 import android.annotation.SuppressLint;
+import android.content.Intent;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import com.datezone.app.api.ApiClient;
+import com.datezone.app.api.RemoteProfile;
+import com.datezone.app.api.RemoteImages;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.view.MotionEvent;
@@ -25,20 +33,25 @@ import java.util.List;
 public class HomeActivity extends AppCompatActivity {
 
     public static class ProfileModel {
-        String name;
-        String age;
-        String details;
-        String distance;
-        int[] photoResIds;
-
-        public ProfileModel(String name, String age, String details, String distance, int[] photoResIds) {
-            this.name = name;
-            this.age = age;
-            this.details = details;
-            this.distance = distance;
-            this.photoResIds = photoResIds;
+        final RemoteProfile remote;
+        final String name, age, details, distance;
+        final int[] photoResIds;
+        ProfileModel(RemoteProfile remote) {
+            this.remote = remote;
+            name = remote.name;
+            age = remote.age;
+            details = remote.details;
+            distance = remote.distance;
+            photoResIds = new int[Math.max(1, remote.photos.length)];
+            java.util.Arrays.fill(photoResIds, R.drawable.discovery_profile_placeholder);
         }
     }
+
+    private ApiClient api;
+    private String searchQuery = "";
+    private boolean loading;
+    private ActivityResultLauncher<Intent> filtersLauncher;
+    private ActivityResultLauncher<Intent> profileLauncher;
 
     private CardView cardTop;
     private CardView cardBackground;
@@ -92,7 +105,8 @@ public class HomeActivity extends AppCompatActivity {
                         bottom + bars.bottom
                 );
 
-                return insets;
+                // The root already reserves this space; children must not add it again.
+                return insets.inset(bars.left, bars.top, bars.right, bars.bottom);
             });
             ViewCompat.requestApplyInsets(root);
         }
@@ -100,11 +114,26 @@ public class HomeActivity extends AppCompatActivity {
         screenWidth = getResources().getDisplayMetrics().widthPixels;
 
         initViews();
-        initData();
+        api = new ApiClient(this);
+        if (savedInstanceState != null) searchQuery = savedInstanceState.getString("searchQuery", "");
+        filtersLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                searchQuery = result.getData().getStringExtra(FiltersActivity.EXTRA_SEARCH_QUERY);
+                if (searchQuery == null) searchQuery = "";
+                loadProfiles();
+            }
+        });
+        profileLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() != RESULT_OK || result.getData() == null || currentProfileIndex >= profileList.size()) return;
+            if (result.getData().getLongExtra("targetId", -1) != profileList.get(currentProfileIndex).remote.id) return;
+            boolean like = ProfileObject2Activity.ACTION_LIKE.equals(result.getData().getStringExtra(ProfileObject2Activity.EXTRA_ACTION));
+            executeSwipeAnimation(like ? 1200f : -1200f, 0, like ? 20f : -20f, like ? "Thích" : "Bỏ qua");
+        });
         displayCurrentProfiles();
         setupCardSwipeGesture();
         setupActionButtons();
         setupBottomNavigation();
+        loadProfiles();
     }
 
     private void initViews() {
@@ -130,18 +159,42 @@ public class HomeActivity extends AppCompatActivity {
         ivSuperLikeOverlay = findViewById(R.id.ivSuperLikeOverlay);
     }
 
-    private void initData() {
-        int[] photos1 = {R.drawable.discovery_photo_1, R.drawable.discovery_photo_2, R.drawable.discovery_photo_3, R.drawable.discovery_photo_4, R.drawable.discovery_photo_5};
-        int[] photos2 = {R.drawable.discovery_photo_2, R.drawable.discovery_photo_3, R.drawable.discovery_photo_1, R.drawable.discovery_photo_5};
-        int[] photos3 = {R.drawable.discovery_photo_3, R.drawable.discovery_photo_4, R.drawable.discovery_photo_2, R.drawable.discovery_photo_1, R.drawable.discovery_photo_5};
-        int[] photos4 = {R.drawable.discovery_photo_4, R.drawable.discovery_photo_1, R.drawable.discovery_photo_5};
-        int[] photos5 = {R.drawable.discovery_photo_5, R.drawable.discovery_photo_2, R.drawable.discovery_photo_3, R.drawable.discovery_photo_1};
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putString("searchQuery", searchQuery);
+        super.onSaveInstanceState(outState);
+    }
 
-        profileList.add(new ProfileModel("Trương Vĩnh Nguyên", "20 tuổi", "Chiều cao 170 cm  Cân nặng 65 kg  Giới tính Nam", "Cách bạn 1,2 km", photos1));
-        profileList.add(new ProfileModel("Nguyễn Minh Anh", "25 tuổi", "Chiều cao 165 cm  Cân nặng 55 kg  Giới tính Nữ", "Cách bạn 2,5 km", photos2));
-        profileList.add(new ProfileModel("Trần Ngọc Linh", "22 tuổi", "Chiều cao 168 cm  Cân nặng 50 kg  Giới tính Nữ", "Cách bạn 3,8 km", photos3));
-        profileList.add(new ProfileModel("Phạm Hoài Nam", "24 tuổi", "Chiều cao 175 cm  Cân nặng 70 kg  Giới tính Nam", "Cách bạn 4,1 km", photos4));
-        profileList.add(new ProfileModel("Lê Hoàng Yến", "21 tuổi", "Chiều cao 162 cm  Cân nặng 48 kg  Giới tính Nữ", "Cách bạn 0,8 km", photos5));
+    private void loadProfiles() {
+        if (loading || isAnimating) return;
+        loading = true;
+        profileList.clear();
+        currentProfileIndex = 0;
+        displayCurrentProfiles();
+        tvNameTop.setText("Đang tải hồ sơ…");
+        tvDetailsTop.setText("");
+        tvDistanceTop.setText("");
+        String path = searchQuery.isEmpty() ? "home/feed?limit=20" : "home/search?" + searchQuery;
+        api.request(this, "GET", path, null, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                JSONArray data = response.getJSONArray("data");
+                List<ProfileModel> loaded = new ArrayList<>();
+                for (int i = 0; i < data.length(); i++) loaded.add(new ProfileModel(new RemoteProfile(data.getJSONObject(i))));
+                profileList.addAll(loaded);
+                loading = false;
+                displayCurrentProfiles();
+                JSONObject meta = response.optJSONObject("meta");
+                if (meta != null && !meta.isNull("expanded"))
+                    Toast.makeText(HomeActivity.this, response.optString("message"), Toast.LENGTH_LONG).show();
+            }
+            @Override public void onError(String message) {
+                loading = false;
+                displayCurrentProfiles();
+                tvNameTop.setText("Chưa tải được hồ sơ");
+                tvDetailsTop.setText(message);
+                tvDistanceTop.setText("Chạm vào thẻ để thử lại");
+            }
+        });
     }
 
     private void displayCurrentProfiles() {
@@ -160,7 +213,7 @@ public class HomeActivity extends AppCompatActivity {
             tvAgeTop.setText("");
             tvDetailsTop.setText("Hãy mở rộng bán kính tìm kiếm hoặc thay đổi bộ lọc.");
             tvDistanceTop.setText("");
-            if (ivPhotoTop != null) ivPhotoTop.setImageResource(R.drawable.discovery_profile_placeholder);
+            if (ivPhotoTop != null) RemoteImages.load(ivPhotoTop, null);
             if (layoutPhotoIndicators != null) layoutPhotoIndicators.removeAllViews();
         }
 
@@ -172,7 +225,7 @@ public class HomeActivity extends AppCompatActivity {
             tvDetailsBg.setText(bgProfile.details);
             tvDistanceBg.setText(bgProfile.distance);
             if (ivPhotoBg != null && bgProfile.photoResIds != null && bgProfile.photoResIds.length > 0) {
-                ivPhotoBg.setImageResource(bgProfile.photoResIds[0]);
+                RemoteImages.load(ivPhotoBg, bgProfile.remote.photos.length == 0 ? null : bgProfile.remote.photos[0]);
             }
             cardBackground.setVisibility(View.VISIBLE);
         } else {
@@ -203,7 +256,7 @@ public class HomeActivity extends AppCompatActivity {
         }
 
         if (ivPhotoTop != null) {
-            ivPhotoTop.setImageResource(profile.photoResIds[currentPhotoIndex]);
+            RemoteImages.load(ivPhotoTop, profile.remote.photos.length == 0 ? null : profile.remote.photos[currentPhotoIndex]);
         }
 
         if (layoutPhotoIndicators != null) {
@@ -240,8 +293,10 @@ public class HomeActivity extends AppCompatActivity {
     @SuppressLint("ClickableViewAccessibility")
     private void setupCardSwipeGesture() {
         cardTop.setOnTouchListener((view, event) -> {
-            if (isAnimating || currentProfileIndex >= profileList.size()) {
-                return false;
+            if (loading || isAnimating) return true;
+            if (currentProfileIndex >= profileList.size()) {
+                if (event.getAction() == MotionEvent.ACTION_UP) loadProfiles();
+                return true;
             }
 
             switch (event.getAction()) {
@@ -287,8 +342,16 @@ public class HomeActivity extends AppCompatActivity {
                     }
                     return true;
 
-                case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
+                    cardTop.setTranslationX(0);
+                    cardTop.setTranslationY(0);
+                    cardTop.setRotation(0);
+                    cardBackground.setScaleX(0.95f);
+                    cardBackground.setScaleY(0.95f);
+                    hideAllOverlays();
+                    return true;
+
+                case MotionEvent.ACTION_UP:
                     float finalDeltaX = event.getRawX() - touchStartX;
                     float finalDeltaY = event.getRawY() - touchStartY;
                     double moveDistance = Math.hypot(finalDeltaX, finalDeltaY);
@@ -349,7 +412,32 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private void executeSwipeAnimation(float targetX, float targetY, float targetRotation, String actionText) {
-        if (isAnimating) return;
+        if (isAnimating || loading || currentProfileIndex >= profileList.size()) return;
+        isAnimating = true;
+        ProfileModel profile = profileList.get(currentProfileIndex);
+        String action = "Bỏ qua".equals(actionText) ? "pass" : "Siêu thích".equals(actionText) ? "superlike" : "like";
+        JSONObject body = new JSONObject();
+        try { body.put("targetId", profile.remote.id).put("action", action); }
+        catch (org.json.JSONException e) { isAnimating = false; return; }
+        api.request(this, "POST", "home/swipe", body, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                boolean matched = response.getJSONObject("data").getBoolean("matched");
+                animateAcceptedSwipe(targetX, targetY, targetRotation, actionText, matched);
+            }
+            @Override public void onError(String message) {
+                isAnimating = false;
+                cardTop.setTranslationX(0);
+                cardTop.setTranslationY(0);
+                cardTop.setRotation(0);
+                cardBackground.setScaleX(0.95f);
+                cardBackground.setScaleY(0.95f);
+                hideAllOverlays();
+                Toast.makeText(HomeActivity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void animateAcceptedSwipe(float targetX, float targetY, float targetRotation, String actionText, boolean matched) {
         isAnimating = true;
 
         if ("Bỏ qua".equals(actionText)) {
@@ -376,7 +464,7 @@ public class HomeActivity extends AppCompatActivity {
                 .rotation(targetRotation)
                 .setDuration(280)
                 .withEndAction(() -> {
-                    if ("Thích".equals(actionText) || "Siêu thích".equals(actionText)) {
+                    if (matched) {
                         ProfileModel currentProfile = (currentProfileIndex < profileList.size()) ? profileList.get(currentProfileIndex) : null;
                         String matchedName = currentProfile != null ? currentProfile.name : "Đối tượng";
                         int matchedPhoto = (currentProfile != null && currentProfile.photoResIds != null && currentProfile.photoResIds.length > 0) ? currentProfile.photoResIds[0] : R.drawable.discovery_photo_1;
@@ -384,7 +472,7 @@ public class HomeActivity extends AppCompatActivity {
                         MatchSuccessDialog matchDialog = new MatchSuccessDialog(
                                 HomeActivity.this,
                                 matchedName,
-                                matchedPhoto,
+                                currentProfile != null && currentProfile.remote.photos.length > 0 ? currentProfile.remote.photos[0] : "",
                                 new MatchSuccessDialog.OnMatchActionListener() {
                                     @Override
                                     public void onSayHello(String targetName) {
@@ -437,20 +525,23 @@ public class HomeActivity extends AppCompatActivity {
 
         findViewById(R.id.btnDiscoveryFilters).setOnClickListener(v -> {
             android.content.Intent intent = new android.content.Intent(HomeActivity.this, FiltersActivity.class);
-            startActivity(intent);
+            if (!loading && !isAnimating) {
+                intent.putExtra(FiltersActivity.EXTRA_SEARCH_QUERY, searchQuery);
+                filtersLauncher.launch(intent);
+            }
         });
 
         // Nút Xem chi tiết hồ sơ (Mũi tên chỉ lên ^) -> Mở ProfileObject2Activity
         findViewById(R.id.btnDiscoveryProfileDetails).setOnClickListener(v -> {
-            if (currentProfileIndex < profileList.size()) {
+            if (!loading && !isAnimating && currentProfileIndex < profileList.size()) {
                 ProfileModel profile = profileList.get(currentProfileIndex);
                 android.content.Intent intent = new android.content.Intent(HomeActivity.this, ProfileObject2Activity.class);
                 intent.putExtra(ProfileObject2Activity.EXTRA_NAME, profile.name);
                 intent.putExtra(ProfileObject2Activity.EXTRA_AGE, profile.age);
                 intent.putExtra(ProfileObject2Activity.EXTRA_DETAILS, profile.details);
                 intent.putExtra(ProfileObject2Activity.EXTRA_LOCATION, profile.distance);
-                intent.putExtra(ProfileObject2Activity.EXTRA_PHOTOS, profile.photoResIds);
-                startActivity(intent);
+                intent.putExtra(ProfileObject2Activity.EXTRA_REMOTE_PROFILE, profile.remote.json.toString());
+                profileLauncher.launch(intent);
             }
         });
     }

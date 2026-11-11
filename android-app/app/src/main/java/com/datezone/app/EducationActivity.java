@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.RadioButton;
@@ -82,6 +84,6 @@ public class EducationActivity extends AppCompatActivity {
         // Chuyển sang lg16_activity_bio
         android.content.Intent intent = new android.content.Intent(EducationActivity.this, BioActivity.class);
         intent.putExtra("EXTRA_EDUCATION", selectedEducation);
-        startActivity(intent);
+        ApiUi.saveProfile(this, ApiUi.data("education", selectedEducation), intent);
     }
 }

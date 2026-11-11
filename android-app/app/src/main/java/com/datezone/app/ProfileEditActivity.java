@@ -1,8 +1,13 @@
 package com.datezone.app;
 
-import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
+import com.datezone.app.api.ApiClient;
+import com.datezone.app.api.ApiUi;
+import com.datezone.app.api.SessionStore;
+import com.datezone.app.api.RemoteImages;
+import com.datezone.app.api.ProfileForm;
+import org.json.JSONObject;
+import org.json.JSONArray;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -49,7 +54,7 @@ public class ProfileEditActivity extends AppCompatActivity {
 
     private GridLayout gridPhotos;
     private TextView tvPhotoCount;
-    private final List<Object> photosList = new ArrayList<>();
+    private final List<JSONObject> photosList = new ArrayList<>();
 
     private ChipGroup chipGroupSelectedInterests;
     private final ArrayList<String> selectedInterestsList = new ArrayList<>();
@@ -70,6 +75,17 @@ public class ProfileEditActivity extends AppCompatActivity {
 
     private ActivityResultLauncher<String> photoPickerLauncher;
     private ActivityResultLauncher<Intent> interestsLauncher;
+    private JSONObject original = new JSONObject();
+    private JSONObject options = new JSONObject();
+    private JSONObject optionCodes = new JSONObject();
+    private boolean loaded, busy;
+    private Bundle pendingDraft;
+
+    private EditText[] fieldViews() { return new EditText[]{edtName, edtBio, edtGender, edtHeight, edtWeight, edtLocation}; }
+    private String[] fieldKeys() { return new String[]{"displayName", "bio", "gender", "heightCm", "weightKg", "city"}; }
+    private TextView[] optionViews() { return new TextView[]{tvRelationship, tvZodiac, tvSmoking, tvDrinking, tvExercise, tvEducation}; }
+    private int[] optionGroups() { return new int[]{R.id.chipGroupEditProfileRelationship, R.id.chipGroupEditProfileZodiac,
+            R.id.chipGroupEditProfileSmoking, R.id.chipGroupEditProfileDrinking, R.id.chipGroupEditProfileExercise, R.id.chipGroupEditProfileEducation}; }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,7 +117,7 @@ public class ProfileEditActivity extends AppCompatActivity {
                         bottom + bars.bottom
                 );
 
-                return insets;
+                return insets.inset(bars.left, bars.top, bars.right, bars.bottom);
             });
             ViewCompat.requestApplyInsets(root);
         }
@@ -111,8 +127,7 @@ public class ProfileEditActivity extends AppCompatActivity {
                 new ActivityResultContracts.GetContent(),
                 uri -> {
                     if (uri != null && photosList.size() < 6) {
-                        photosList.add(uri);
-                        renderPhotosGrid();
+                        uploadPhoto(uri);
                     }
                 }
         );
@@ -133,9 +148,12 @@ public class ProfileEditActivity extends AppCompatActivity {
         );
 
         initViews();
-        loadInitialPhotosAndInterests();
-        loadSavedData();
+        pendingDraft = savedInstanceState;
         setupListeners();
+        edtGender.setKeyListener(null);
+        edtGender.setFocusable(false);
+        edtGender.setOnClickListener(v -> chooseGender());
+        loadProfile();
     }
 
     private void initViews() {
@@ -157,22 +175,6 @@ public class ProfileEditActivity extends AppCompatActivity {
         tvDrinking = findViewById(R.id.tvEditProfileDrinking);
         tvExercise = findViewById(R.id.tvEditProfileExercise);
         tvEducation = findViewById(R.id.tvEditProfileEducation);
-    }
-
-    private void loadInitialPhotosAndInterests() {
-        // Khởi tạo 2 ảnh mặc định
-        photosList.clear();
-        photosList.add(R.drawable.discovery_photo_1);
-        photosList.add(R.drawable.discovery_photo_2);
-        renderPhotosGrid();
-
-        // Khởi tạo các sở thích mặc định
-        selectedInterestsList.clear();
-        selectedInterestsList.add("Du lịch");
-        selectedInterestsList.add("Âm nhạc");
-        selectedInterestsList.add("Cà phê");
-        selectedInterestsList.add("Ẩm thực");
-        renderSelectedInterests();
     }
 
     private void renderPhotosGrid() {
@@ -217,16 +219,7 @@ public class ProfileEditActivity extends AppCompatActivity {
                 ));
                 ivPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
-                Object photoObj = photosList.get(i);
-                if (photoObj instanceof Integer) {
-                    ivPhoto.setImageResource((Integer) photoObj);
-                } else if (photoObj instanceof Uri) {
-                    try {
-                        ivPhoto.setImageURI((Uri) photoObj);
-                    } catch (Exception e) {
-                        ivPhoto.setImageResource(R.drawable.discovery_photo_1);
-                    }
-                }
+                RemoteImages.load(ivPhoto, photosList.get(i).optString("url"));
 
                 // Nút 'X' xóa ảnh ở góc trên bên phải
                 ImageView btnRemove = new ImageView(this);
@@ -242,8 +235,7 @@ public class ProfileEditActivity extends AppCompatActivity {
                 btnRemove.setColorFilter(Color.WHITE);
 
                 btnRemove.setOnClickListener(v -> {
-                    photosList.remove(index);
-                    renderPhotosGrid();
+                    deletePhoto(index);
                 });
 
                 frameLayout.addView(ivPhoto);
@@ -285,7 +277,7 @@ public class ProfileEditActivity extends AppCompatActivity {
 
                 if (i == photosList.size()) {
                     // Ô '+' kế tiếp cho phép bấm chọn thêm ảnh mới từ thiết bị
-                    cardView.setOnClickListener(v -> photoPickerLauncher.launch("image/*"));
+                    cardView.setOnClickListener(v -> { if (!busy && loaded) photoPickerLauncher.launch("image/*"); });
                 } else {
                     cardView.setOnClickListener(v -> Toast.makeText(this, "Vui lòng thêm ảnh theo thứ tự", Toast.LENGTH_SHORT).show());
                 }
@@ -313,45 +305,6 @@ public class ProfileEditActivity extends AppCompatActivity {
         }
     }
 
-    private void loadSavedData() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-
-        String savedName = prefs.getString(KEY_NAME, "Trương Vĩnh Nguyên");
-        String savedBio = prefs.getString(KEY_BIO, "Thích du lịch, cà phê và nghe nhạc indie.");
-        String savedGender = prefs.getString(KEY_GENDER, "Nam");
-        String savedHeight = prefs.getString(KEY_HEIGHT, "170 cm");
-        String savedWeight = prefs.getString(KEY_WEIGHT, "65 kg");
-        String savedLocation = prefs.getString(KEY_LOCATION, "Hồ Chí Minh, Việt Nam");
-
-        String savedRelationship = prefs.getString(KEY_RELATIONSHIP, "Người yêu lâu dài");
-        String savedZodiac = prefs.getString(KEY_ZODIAC, "Bảo Bình");
-        String savedSmoking = prefs.getString(KEY_SMOKING, "Không bao giờ");
-        String savedDrinking = prefs.getString(KEY_DRINKING, "Thỉnh thoảng");
-        String savedExercise = prefs.getString(KEY_EXERCISE, "Mỗi ngày");
-        String savedEducation = prefs.getString(KEY_EDUCATION, "Đại học");
-
-        if (edtName != null) edtName.setText(savedName);
-        if (edtBio != null) edtBio.setText(savedBio);
-        if (edtGender != null) edtGender.setText(savedGender);
-        if (edtHeight != null) edtHeight.setText(savedHeight);
-        if (edtWeight != null) edtWeight.setText(savedWeight);
-        if (edtLocation != null) edtLocation.setText(savedLocation);
-
-        setOptionText(tvRelationship, savedRelationship);
-        setOptionText(tvZodiac, savedZodiac);
-        setOptionText(tvSmoking, savedSmoking);
-        setOptionText(tvDrinking, savedDrinking);
-        setOptionText(tvExercise, savedExercise);
-        setOptionText(tvEducation, savedEducation);
-
-        syncChipSelections(findViewById(R.id.chipGroupEditProfileRelationship), savedRelationship);
-        syncChipSelections(findViewById(R.id.chipGroupEditProfileZodiac), savedZodiac);
-        syncChipSelections(findViewById(R.id.chipGroupEditProfileSmoking), savedSmoking);
-        syncChipSelections(findViewById(R.id.chipGroupEditProfileDrinking), savedDrinking);
-        syncChipSelections(findViewById(R.id.chipGroupEditProfileExercise), savedExercise);
-        syncChipSelections(findViewById(R.id.chipGroupEditProfileEducation), savedEducation);
-    }
-
     private void setOptionText(TextView textView, String value) {
         if (textView != null) {
             textView.setText(value);
@@ -375,7 +328,7 @@ public class ProfileEditActivity extends AppCompatActivity {
                 Intent intent = new Intent(ProfileEditActivity.this, InterestsActivity.class);
                 intent.putStringArrayListExtra(InterestsActivity.EXTRA_SELECTED_INTERESTS, selectedInterestsList);
                 intent.putExtra(InterestsActivity.EXTRA_IS_EDIT, true);
-                interestsLauncher.launch(intent);
+                if (loaded && !busy) interestsLauncher.launch(intent);
             });
         }
 
@@ -438,19 +391,6 @@ public class ProfileEditActivity extends AppCompatActivity {
             rowView.setOnClickListener(v -> toggleSection(container, arrow));
         }
 
-        if (chipGroup != null && targetTextView != null) {
-            for (int i = 0; i < chipGroup.getChildCount(); i++) {
-                View child = chipGroup.getChildAt(i);
-                if (child instanceof Chip) {
-                    Chip chip = (Chip) child;
-                    chip.setOnClickListener(v -> {
-                        if (chip.isChecked()) {
-                            setOptionText(targetTextView, chip.getText().toString());
-                        }
-                    });
-                }
-            }
-        }
     }
 
     private void toggleSection(LinearLayout container, ImageView arrow) {
@@ -465,40 +405,229 @@ public class ProfileEditActivity extends AppCompatActivity {
         }
     }
 
-    private void syncChipSelections(ChipGroup chipGroup, String savedValue) {
-        if (chipGroup == null || savedValue == null) return;
-        for (int i = 0; i < chipGroup.getChildCount(); i++) {
-            View child = chipGroup.getChildAt(i);
-            if (child instanceof Chip) {
-                Chip chip = (Chip) child;
-                if (savedValue.equalsIgnoreCase(chip.getText().toString())) {
-                    chip.setChecked(true);
-                }
+    private void setFormEnabled(View view, boolean enabled) {
+        view.setEnabled(enabled);
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) setFormEnabled(group.getChildAt(i), enabled);
+        }
+    }
+
+    private void setBusy(boolean value) {
+        busy = value;
+        setFormEnabled(findViewById(R.id.editProfileScroll), loaded && !value);
+        findViewById(R.id.btnEditProfileSave).setEnabled(!value);
+        findViewById(R.id.btnEditProfileSaveChanges).setEnabled(!value);
+        ((TextView) findViewById(R.id.btnEditProfileSave)).setText(value ? "…" : loaded ? "Lưu" : "Tải lại");
+        ((TextView) findViewById(R.id.btnEditProfileSaveChanges)).setText(value ? "Đang xử lý…" : loaded ? "Lưu thay đổi" : "Thử tải lại hồ sơ");
+    }
+
+    private void showError(String message) {
+        setBusy(false);
+        TextView status = findViewById(R.id.tvEditProfileStatus);
+        status.setText(message);
+        status.setVisibility(View.VISIBLE);
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    }
+
+    private void loadProfile() {
+        if (busy) return;
+        loaded = false;
+        for (EditText field : fieldViews()) field.setText("");
+        setBusy(true);
+        ((TextView) findViewById(R.id.tvEditProfileStatus)).setText("Đang tải hồ sơ…");
+        ApiClient api = new ApiClient(this);
+        api.request(this, "GET", "users/me", null, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                original = response.getJSONObject("data");
+                new SessionStore(ProfileEditActivity.this).saveUser(original);
+                api.publicRequest(ProfileEditActivity.this, "GET", "meta/options", null, new ApiClient.Callback() {
+                    @Override public void onSuccess(JSONObject response) throws Exception {
+                        options = response.getJSONObject("data");
+                        bindProfile();
+                        loaded = true;
+                        setBusy(false);
+                        findViewById(R.id.tvEditProfileStatus).setVisibility(View.GONE);
+                    }
+                    @Override public void onError(String message) { showError(message); }
+                });
+            }
+            @Override public void onError(String message) { showError(message); }
+        });
+    }
+
+    private void bindProfile() throws Exception {
+        EditText[] fields = fieldViews();
+        String[] keys = fieldKeys();
+        for (int i = 0; i < keys.length; i++) {
+            String value = ProfileForm.text(original, keys[i]);
+            if ("gender".equals(keys[i])) value = ProfileForm.label(options, "gender", value);
+            fields[i].setText(value);
+        }
+        optionCodes = new JSONObject();
+        for (String key : ProfileForm.OPTION_KEYS) optionCodes.put(key, original.opt(key) == null ? JSONObject.NULL : original.opt(key));
+        selectedInterestsList.clear();
+        JSONArray interests = original.optJSONArray("interests");
+        if (interests != null) for (int i = 0; i < interests.length(); i++)
+            selectedInterestsList.add(interests.getJSONObject(i).getString("name"));
+        if (pendingDraft != null && pendingDraft.containsKey("profileDraft")) {
+            JSONObject draft = new JSONObject(pendingDraft.getString("profileDraft"));
+            for (int i = 0; i < keys.length; i++) fields[i].setText(draft.optString(keys[i]));
+            optionCodes = new JSONObject(pendingDraft.getString("optionDraft", "{}"));
+            ArrayList<String> selected = pendingDraft.getStringArrayList("interestDraft");
+            if (selected != null) { selectedInterestsList.clear(); selectedInterestsList.addAll(selected); }
+        }
+        pendingDraft = null;
+        photosList.clear();
+        JSONArray photos = original.optJSONArray("photos");
+        if (photos != null) for (int i = 0; i < photos.length(); i++) photosList.add(photos.getJSONObject(i));
+        bindOptionGroups();
+        renderPhotosGrid();
+        renderSelectedInterests();
+    }
+
+    private void bindOptionGroups() throws Exception {
+        for (int i = 0; i < ProfileForm.OPTION_KEYS.length; i++) {
+            String key = ProfileForm.OPTION_KEYS[i];
+            TextView summary = optionViews()[i];
+            ChipGroup group = findViewById(optionGroups()[i]);
+            group.removeAllViews();
+            group.setSingleSelection(true);
+            group.setSelectionRequired(true);
+            JSONArray choices = options.optJSONArray(key);
+            String selected = ProfileForm.text(optionCodes, key);
+            setOptionText(summary, selected.isEmpty() ? "Chưa chọn" : ProfileForm.label(options, key, selected));
+            for (int j = -1; choices != null && j < choices.length(); j++) {
+                String code = j < 0 ? "" : choices.getJSONObject(j).getString("code");
+                String label = j < 0 ? "Chưa chọn" : choices.getJSONObject(j).optString("shortLabel", choices.getJSONObject(j).getString("label"));
+                Chip chip = (Chip) getLayoutInflater().inflate(R.layout.item_profile_interest_chip, group, false);
+                chip.setId(View.generateViewId());
+                chip.setCheckable(true);
+                chip.setClickable(true);
+                chip.setFocusable(true);
+                chip.setText(label);
+                chip.setChecked(code.equals(selected));
+                chip.setOnCheckedChangeListener((button, checked) -> {
+                    if (checked) {
+                        try { optionCodes.put(key, code.isEmpty() ? JSONObject.NULL : code); }
+                        catch (org.json.JSONException e) { throw new IllegalStateException(e); }
+                        setOptionText(summary, label);
+                    }
+                });
+                group.addView(chip);
             }
         }
     }
 
+    private void chooseGender() {
+        if (!loaded || busy) return;
+        JSONArray choices = options.optJSONArray("gender");
+        if (choices == null) return;
+        String[] labels = new String[choices.length()];
+        for (int i = 0; i < labels.length; i++) labels[i] = choices.optJSONObject(i).optString("label");
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Giới tính")
+                .setItems(labels, (dialog, position) -> edtGender.setText(labels[position])).show();
+    }
+
+    private java.util.Map<String, String> formFields() {
+        java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+        EditText[] fields = fieldViews();
+        String[] keys = fieldKeys();
+        for (int i = 0; i < keys.length; i++) result.put(keys[i], fields[i].getText().toString());
+        return result;
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        if (loaded) {
+            state.putString("profileDraft", new JSONObject(formFields()).toString());
+            state.putString("optionDraft", optionCodes.toString());
+            state.putStringArrayList("interestDraft", new ArrayList<>(selectedInterestsList));
+        }
+        super.onSaveInstanceState(state);
+    }
+
     private void saveProfileData() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
+        if (busy) return;
+        if (!loaded) { loadProfile(); return; }
+        final JSONObject patch;
+        try {
+            patch = ProfileForm.patch(original, options, formFields(), optionCodes);
+            if (selectedInterestsList.size() < 3 || selectedInterestsList.size() > 20)
+                throw new IllegalArgumentException("Vui lòng chọn từ 3 đến 20 sở thích.");
+        } catch (Exception e) { showError(e.getMessage()); return; }
+        setBusy(true);
+        if (patch.length() == 0) { saveInterests(false); return; }
+        new ApiClient(this).request(this, "PUT", "users/me/profile", patch, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                original = response.getJSONObject("data");
+                new SessionStore(ProfileEditActivity.this).saveUser(original);
+                saveInterests(true);
+            }
+            @Override public void onError(String message) { showError(message); }
+        });
+    }
 
-        if (edtName != null) editor.putString(KEY_NAME, edtName.getText().toString().trim());
-        if (edtBio != null) editor.putString(KEY_BIO, edtBio.getText().toString().trim());
-        if (edtGender != null) editor.putString(KEY_GENDER, edtGender.getText().toString().trim());
-        if (edtHeight != null) editor.putString(KEY_HEIGHT, edtHeight.getText().toString().trim());
-        if (edtWeight != null) editor.putString(KEY_WEIGHT, edtWeight.getText().toString().trim());
-        if (edtLocation != null) editor.putString(KEY_LOCATION, edtLocation.getText().toString().trim());
+    private void saveInterests(boolean profileSaved) {
+        java.util.Set<String> before = new java.util.HashSet<>();
+        JSONArray old = original.optJSONArray("interests");
+        if (old != null) for (int i = 0; i < old.length(); i++) before.add(old.optJSONObject(i).optString("name"));
+        if (before.equals(new java.util.HashSet<>(selectedInterestsList))) { saved(); return; }
+        new ApiClient(this).request(this, "PUT", "users/me/interests",
+                ApiUi.data("interestNames", new JSONArray(selectedInterestsList)), new ApiClient.Callback() {
+                    @Override public void onSuccess(JSONObject response) throws Exception {
+                        original = response.getJSONObject("data");
+                        new SessionStore(ProfileEditActivity.this).saveUser(original);
+                        saved();
+                    }
+                    @Override public void onError(String message) {
+                        showError((profileSaved ? "Thông tin cơ bản đã lưu, nhưng chưa lưu được sở thích. " : "") + message);
+                    }
+                });
+    }
 
-        if (tvRelationship != null) editor.putString(KEY_RELATIONSHIP, tvRelationship.getText().toString());
-        if (tvZodiac != null) editor.putString(KEY_ZODIAC, tvZodiac.getText().toString());
-        if (tvSmoking != null) editor.putString(KEY_SMOKING, tvSmoking.getText().toString());
-        if (tvDrinking != null) editor.putString(KEY_DRINKING, tvDrinking.getText().toString());
-        if (tvExercise != null) editor.putString(KEY_EXERCISE, tvExercise.getText().toString());
-        if (tvEducation != null) editor.putString(KEY_EDUCATION, tvEducation.getText().toString());
-
-        editor.apply();
-
-        Toast.makeText(this, "Đã cập nhật hồ sơ cá nhân thành công!", Toast.LENGTH_SHORT).show();
+    private void saved() {
+        Toast.makeText(this, "Đã cập nhật hồ sơ", Toast.LENGTH_SHORT).show();
+        setResult(RESULT_OK);
         finish();
+    }
+
+    private void cachePhotos() throws Exception {
+        JSONArray photos = new JSONArray(photosList);
+        JSONObject user = new SessionStore(this).user();
+        user.put("photos", photos).put("avatarUrl", photosList.isEmpty() ? JSONObject.NULL : photosList.get(0).getString("url"));
+        new SessionStore(this).saveUser(user);
+        original.put("photos", photos);
+        renderPhotosGrid();
+    }
+
+    private void uploadPhoto(Uri uri) {
+        if (busy || !loaded) return;
+        setBusy(true);
+        new ApiClient(this).uploadPhoto(this, uri, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                photosList.add(response.getJSONObject("data"));
+                cachePhotos();
+                setBusy(false);
+            }
+            @Override public void onError(String message) { showError(message); }
+        });
+    }
+
+    private void deletePhoto(int index) {
+        if (busy || !loaded || index >= photosList.size()) return;
+        JSONObject onboarding = original.optJSONObject("onboarding");
+        if (onboarding != null && onboarding.optBoolean("completed") && photosList.size() <= 2) {
+            showError("Hồ sơ cần ít nhất 2 ảnh. Hãy thêm ảnh mới trước khi xóa ảnh này.");
+            return;
+        }
+        setBusy(true);
+        new ApiClient(this).request(this, "DELETE", "users/me/photos/" + photosList.get(index).optLong("id"), null, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                photosList.remove(index);
+                cachePhotos();
+                setBusy(false);
+            }
+            @Override public void onError(String message) { showError(message); }
+        });
     }
 }

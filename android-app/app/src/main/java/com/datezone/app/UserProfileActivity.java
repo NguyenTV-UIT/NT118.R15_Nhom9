@@ -1,16 +1,18 @@
 package com.datezone.app;
 
-import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.graphics.Color;
+import com.datezone.app.api.ApiClient;
+import com.datezone.app.api.SessionStore;
+import com.datezone.app.api.ProfileForm;
+import com.datezone.app.api.RemoteImages;
+import com.datezone.app.api.RemoteProfile;
+import org.json.JSONObject;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -36,12 +38,8 @@ public class UserProfileActivity extends AppCompatActivity {
 
     private ChipGroup chipGroupProfileInterests;
 
-    private int[] userPhotoResIds = new int[]{
-            R.drawable.discovery_photo_1,
-            R.drawable.discovery_photo_2,
-            R.drawable.discovery_photo_3,
-            R.drawable.discovery_photo_4
-    };
+    private String[] userPhotoUrls = new String[0];
+    private JSONObject options = new JSONObject();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,6 +79,7 @@ public class UserProfileActivity extends AppCompatActivity {
         initViews();
         loadSavedUserData();
         setupListeners();
+        refreshProfile();
     }
 
     private void initViews() {
@@ -101,49 +100,73 @@ public class UserProfileActivity extends AppCompatActivity {
     }
 
     private void loadSavedUserData() {
-        SharedPreferences prefs = getSharedPreferences(ProfileEditActivity.PREFS_NAME, Context.MODE_PRIVATE);
+        bindUser(new SessionStore(this).user());
+    }
 
-        String name = prefs.getString(ProfileEditActivity.KEY_NAME, "Trương Vĩnh Nguyên");
-        String bio = prefs.getString(ProfileEditActivity.KEY_BIO, "Thích du lịch, cà phê và trải nghiệm các địa điểm mới.");
-        String gender = prefs.getString(ProfileEditActivity.KEY_GENDER, "Nam");
-        String height = prefs.getString(ProfileEditActivity.KEY_HEIGHT, "170 cm");
-        String weight = prefs.getString(ProfileEditActivity.KEY_WEIGHT, "65 kg");
-        String location = prefs.getString(ProfileEditActivity.KEY_LOCATION, "Thành phố Hồ Chí Minh, Việt Nam");
+    private void refreshProfile() {
+        ApiClient api = new ApiClient(this);
+        api.request(this, "GET", "users/me", null, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                JSONObject user = response.getJSONObject("data");
+                new SessionStore(UserProfileActivity.this).saveUser(user);
+                bindUser(user);
+            }
+            @Override public void onError(String message) {
+                android.widget.Toast.makeText(UserProfileActivity.this, message, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+        api.publicRequest(this, "GET", "meta/options", null, new ApiClient.Callback() {
+            @Override public void onSuccess(JSONObject response) throws Exception {
+                options = response.getJSONObject("data");
+                loadSavedUserData();
+            }
+            @Override public void onError(String message) {
+                android.widget.Toast.makeText(UserProfileActivity.this, message, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+    }
 
-        String relationship = prefs.getString(ProfileEditActivity.KEY_RELATIONSHIP, "Người yêu lâu dài");
-        String zodiac = prefs.getString(ProfileEditActivity.KEY_ZODIAC, "Bảo Bình");
-        String smoking = prefs.getString(ProfileEditActivity.KEY_SMOKING, "Không bao giờ");
-        String drinking = prefs.getString(ProfileEditActivity.KEY_DRINKING, "Thỉnh thoảng");
-        String exercise = prefs.getString(ProfileEditActivity.KEY_EXERCISE, "Mỗi ngày");
-        String education = prefs.getString(ProfileEditActivity.KEY_EDUCATION, "Đại học");
-
-        if (tvProfileNameAge != null) tvProfileNameAge.setText(name + ", 20");
-        if (tvProfileGender != null) tvProfileGender.setText("Chiều cao " + height + "  Cân nặng " + weight + "  Giới tính " + gender);
-        if (tvProfileLocation != null) tvProfileLocation.setText(location);
-        if (tvProfileBio != null) tvProfileBio.setText(bio);
-
-        if (tvProfileGoal != null) tvProfileGoal.setText("Mục tiêu: " + relationship);
-        if (tvProfileZodiac != null) tvProfileZodiac.setText("Cung hoàng đạo: " + zodiac);
-        if (tvProfileSmoking != null) tvProfileSmoking.setText("Hút thuốc: " + smoking);
-        if (tvProfileDrinking != null) tvProfileDrinking.setText("Rượu bia: " + drinking);
-        if (tvProfileExercise != null) tvProfileExercise.setText("Tập luyện: " + exercise);
-        if (tvProfileEducation != null) tvProfileEducation.setText("Học vấn: " + education);
-
-        // Nạp Chip sở thích
-        if (chipGroupProfileInterests != null) {
-            chipGroupProfileInterests.removeAllViews();
-            int brandPrimaryColor = ContextCompat.getColor(this, R.color.brand_primary);
-            String[] defaultInterests = new String[]{"Du lịch", "Âm nhạc", "Cà phê", "Ẩm thực"};
-
-            for (String interest : defaultInterests) {
-                Chip chip = new Chip(this);
+    private void bindUser(JSONObject user) {
+        userPhotoUrls = new String[0];
+        tvProfileNameAge.setText(ProfileForm.text(user, "displayName"));
+        tvProfileGender.setText("");
+        tvProfileLocation.setText(ProfileForm.text(user, "city"));
+        tvProfileBio.setText(ProfileForm.text(user, "bio"));
+        chipGroupProfileInterests.removeAllViews();
+        RemoteImages.load(ivProfileCover, null);
+        ImageView[] gallery = {findViewById(R.id.ivProfileGalleryPhoto1), findViewById(R.id.ivProfileGalleryPhoto2),
+                findViewById(R.id.ivProfileGalleryPhoto3), findViewById(R.id.ivProfileGalleryPhoto4)};
+        TextView[] textViews = {tvProfileGoal, tvProfileZodiac, tvProfileSmoking, tvProfileDrinking, tvProfileExercise, tvProfileEducation};
+        String[] titles = {"Mục tiêu", "Cung hoàng đạo", "Hút thuốc", "Rượu bia", "Tập luyện", "Học vấn"};
+        for (int i = 0; i < textViews.length; i++) {
+            String code = ProfileForm.text(user, ProfileForm.OPTION_KEYS[i]);
+            String label = ProfileForm.label(options, ProfileForm.OPTION_KEYS[i], code);
+            textViews[i].setText(titles[i] + ": " + (code.isEmpty() ? "Chưa cập nhật" : label.isEmpty() ? "Chưa tải được lựa chọn" : label));
+        }
+        for (ImageView image : gallery) { RemoteImages.load(image, null); ((View) image.getParent()).setVisibility(View.GONE); }
+        if (!user.has("id")) return;
+        try {
+            // Preview follows public-profile visibility, even when /users/me includes private fields.
+            JSONObject publicData = new JSONObject(user.toString());
+            if (!user.optBoolean("showGender", true)) publicData.put("gender", JSONObject.NULL);
+            RemoteProfile profile = new RemoteProfile(publicData);
+            userPhotoUrls = profile.photos;
+            tvProfileNameAge.setText(profile.name + (profile.age.isEmpty() ? "" : ", " + profile.age));
+            tvProfileGender.setText(profile.details);
+            tvProfileGender.setVisibility(profile.details.isEmpty() ? View.GONE : View.VISIBLE);
+            tvProfileBio.setText(profile.bio.isEmpty() ? "Chưa có giới thiệu" : profile.bio);
+            RemoteImages.load(ivProfileCover, profile.photos.length == 0 ? null : profile.photos[0]);
+            for (int i = 0; i < gallery.length && i < profile.photos.length; i++) {
+                ((View) gallery[i].getParent()).setVisibility(View.VISIBLE);
+                RemoteImages.load(gallery[i], profile.photos[i]);
+            }
+            for (String interest : profile.interests) {
+                Chip chip = (Chip) getLayoutInflater().inflate(R.layout.item_profile_interest_chip, chipGroupProfileInterests, false);
                 chip.setText(interest);
-                chip.setCheckable(false);
-                chip.setClickable(false);
-                chip.setTextColor(Color.WHITE);
-                chip.setChipBackgroundColor(android.content.res.ColorStateList.valueOf(brandPrimaryColor));
                 chipGroupProfileInterests.addView(chip);
             }
+        } catch (Exception e) {
+            android.widget.Toast.makeText(this, "Không đọc được hồ sơ", android.widget.Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -154,7 +177,7 @@ public class UserProfileActivity extends AppCompatActivity {
         // Bấm xem tất cả ảnh / chọn ảnh album -> Mở PhotoViewerActivity
         View.OnClickListener photoViewerListener = v -> {
             Intent intent = new Intent(UserProfileActivity.this, PhotoViewerActivity.class);
-            intent.putExtra(PhotoViewerActivity.EXTRA_PHOTOS, userPhotoResIds);
+            intent.putExtra(PhotoViewerActivity.EXTRA_PHOTO_URLS, userPhotoUrls);
             startActivity(intent);
         };
 

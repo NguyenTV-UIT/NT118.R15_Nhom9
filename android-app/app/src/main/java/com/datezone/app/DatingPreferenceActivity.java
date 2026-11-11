@@ -1,5 +1,7 @@
 package com.datezone.app;
 
+import com.datezone.app.api.ApiUi;
+
 import android.os.Bundle;
 import android.view.View;
 import android.widget.RadioButton;
@@ -73,6 +75,6 @@ public class DatingPreferenceActivity extends AppCompatActivity {
         // Chuyển sang lg6_activity_location_distance
         android.content.Intent intent = new android.content.Intent(DatingPreferenceActivity.this, LocationDistanceActivity.class);
         intent.putExtra("EXTRA_DATING_PREFERENCE", selectedPreference);
-        startActivity(intent);
+        ApiUi.save(this, "users/me/preferences", ApiUi.data("interestedIn", selectedPreference), intent);
     }
 }

@@ -1,0 +1,4 @@
+<resources>
+    <item name="api_image_request" type="id" />
+    <item name="api_request_pending" type="id" />
+</resources>

@@ -52,12 +52,13 @@ public class ProfileReadyActivity extends AppCompatActivity {
     }
 
     private void startApp() {
-        Toast.makeText(this, "Chào mừng bạn đến với Date Zone!", Toast.LENGTH_SHORT).show();
-
-        // Chuyển sang màn hình chính Discovery (discovery_activity_home)
-        Intent intent = new Intent(ProfileReadyActivity.this, HomeActivity.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(intent);
-        finish();
+        com.datezone.app.api.ApiUi.send(this, R.id.btnContinue, true, "POST", "users/me/onboarding/complete",
+                com.datezone.app.api.ApiUi.data(), response -> {
+                    new com.datezone.app.api.SessionStore(this).saveUser(response.getJSONObject("data"));
+                    Intent intent = new Intent(this, HomeActivity.class);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                    finish();
+                });
     }
 }

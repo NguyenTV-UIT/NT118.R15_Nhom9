@@ -2,6 +2,7 @@ const router = require('express').Router();
 const h = require('../../utils/asyncHandler');
 const db = require('../../config/db');
 const { ok } = require('../../utils/response');
+const env = require('../../config/env');
 const options = require('./options');
 
 /**
@@ -18,6 +19,22 @@ router.get(
       ...options.asJson(),
       interests: interests.map((r) => ({ id: Number(r.id), name: r.name, inApp: order.has(r.name) })),
       limits: options.LIMITS,
+      // Cấu hình luồng đăng ký / đăng nhập để app biết có phải hiện màn nhập OTP không
+      auth: {
+        registerOtpRequired: env.registerOtpRequired,
+        emailLoginOtpRequired: env.emailLoginOtpRequired,
+        phoneAuthEnabled: env.phoneAuthEnabled,
+        emailChangeVerifyNew: env.emailChangeVerifyNew,
+      },
+      // Mốc độ thân thiết trong chat
+      chat: {
+        intimacyMax: env.chat.intimacyCall,
+        photoUnlockAt: env.chat.intimacyPhoto,
+        callUnlockAt: env.chat.intimacyCall,
+        maxMessageLength: env.chat.maxMessageLength,
+        callRingSeconds: env.chat.callRingSeconds,
+      },
+      deleteConfirmWord: 'XÓA',
     });
   }),
 );

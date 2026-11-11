@@ -64,4 +64,52 @@ const setInterests = z
 
 const idParam = (name) => z.object({ [name]: z.coerce.number().int().positive() });
 
-module.exports = { updateProfile, updatePreferences, setInterests, idParam };
+// ── Cài đặt / tài khoản ──
+const email = z.string().trim().toLowerCase().email('Email không hợp lệ').max(255);
+
+const updateSettings = z
+  .object({
+    pushEnabled: z.boolean().optional(),
+    showActiveStatus: z.boolean().optional(),
+    showDistance: z.boolean().optional(),
+  })
+  .refine((d) => Object.values(d).some((x) => x !== undefined), { message: 'Gửi ít nhất 1 công tắc', path: ['pushEnabled'] });
+
+const verifyCurrentEmail = z.object({ email });
+const otpOnly = z.object({ otp: v.otp });
+const changeEmail = z.object({ emailChangeToken: z.string().min(1, 'Thiếu emailChangeToken'), newEmail: email });
+const confirmNewEmail = z.object({ pendingToken: z.string().min(1, 'Thiếu pendingToken'), otp: v.otp });
+
+const deleteAccount = z.object({
+  confirm: z.string({ required_error: 'Vui lòng nhập XÓA để xác nhận' }),
+  reason: v.option('deleteReason').nullable().optional(),
+  details: z.string().trim().max(500).optional(),
+});
+
+const deviceToken = z.object({
+  token: z.string().trim().min(10, 'Token không hợp lệ').max(255),
+  platform: z.enum(['android', 'web']).default('android'),
+});
+const deviceTokenRemove = z.object({ token: z.string().trim().min(1).max(255) });
+
+// ── An toàn ──
+const report = z.object({
+  reason: v.option('reportReason'),
+  details: z.string().trim().max(1000, 'Tối đa 1000 ký tự').transform((s) => s || undefined).optional(),
+});
+
+module.exports = {
+  updateProfile,
+  updatePreferences,
+  setInterests,
+  idParam,
+  updateSettings,
+  verifyCurrentEmail,
+  otpOnly,
+  changeEmail,
+  confirmNewEmail,
+  deleteAccount,
+  deviceToken,
+  deviceTokenRemove,
+  report,
+};

@@ -7,12 +7,23 @@ const ApiError = require('../../utils/ApiError');
 const { ageFromBirthday } = require('../../utils/age');
 const { UPLOAD_DIR } = require('../../middlewares/upload');
 const options = require('../meta/options');
+const hub = require('../../realtime/hub');
 
 const MAX_PHOTOS = options.LIMITS.photos.max;
 
-/** Cột hồ sơ công khai - dùng chung cho mọi câu SELECT trả về thẻ người dùng (feed, search, match...). */
+/**
+ * Cột hồ sơ công khai - dùng chung cho mọi câu SELECT trả về thẻ người dùng (feed, search, match, chat...).
+ * Câu SELECT phải đặt alias: users = u, profiles = p.
+ */
 const PUBLIC_PROFILE_COLUMNS = `p.display_name, p.birthday, p.gender, p.show_gender, p.bio, p.job_title, p.school, p.city,
-            p.height_cm, p.relationship_goal, p.zodiac, p.smoking, p.drinking, p.exercise, p.education`;
+            p.height_cm, p.relationship_goal, p.zodiac, p.smoking, p.drinking, p.exercise, p.education,
+            p.show_distance, p.show_active_status, u.last_active_at`;
+
+/** "Đang online": đang mở kết nối realtime, hoặc vừa có hoạt động trong vài phút gần đây. */
+function isOnline(userId, lastActiveAt) {
+  if (hub.isOnline(userId)) return true;
+  return Boolean(lastActiveAt) && Date.now() - new Date(lastActiveAt).getTime() < env.chat.onlineWindowSeconds * 1000;
+}
 
 // DB lưu đường dẫn tương đối (/uploads/abc.jpg); trả về URL đầy đủ để đổi IP/domain không phải sửa DB.
 const toPhotoUrl = (url) => (/^https?:\/\//.test(url) ? url : `${env.publicBaseUrl}${url}`);
@@ -49,13 +60,17 @@ async function loadExtras(userIds) {
 
 /**
  * Hồ sơ hiển thị cho người khác xem.
- * KHÔNG có: email, SĐT, ngày sinh, toạ độ, cân nặng. Giới tính ẩn nếu người dùng tắt "Hiển thị giới tính".
+ * KHÔNG có: email, SĐT, ngày sinh, toạ độ, cân nặng. Giới tính / khoảng cách / trạng thái online bị ẩn (null)
+ * nếu người đó tắt công tắc tương ứng.
  * Các trường lựa chọn trả về MÃ (VD smoking: "never"), nhãn tiếng Việt lấy từ GET /api/meta/options.
  */
 function toPublicProfile(row, extras) {
   const id = Number(row.id ?? row.user_id);
   const photos = extras.photos.get(id) || [];
-  const showGender = row.show_gender == null ? true : Boolean(Number(row.show_gender));
+  const flag = (v) => (v == null ? true : Boolean(Number(v)));
+  const showGender = flag(row.show_gender);
+  const showDistance = flag(row.show_distance); // Cài đặt "Hiện khoảng cách của tôi"
+  const showActive = flag(row.show_active_status); // Cài đặt "Hiện trạng thái hoạt động"
   return {
     id,
     displayName: row.display_name,
@@ -72,7 +87,9 @@ function toPublicProfile(row, extras) {
     drinking: row.drinking ?? null,
     exercise: row.exercise ?? null,
     education: row.education ?? null,
-    distanceKm: row.distance_km == null ? null : Math.max(1, Math.round(Number(row.distance_km))),
+    distanceKm: !showDistance || row.distance_km == null ? null : Math.max(1, Math.round(Number(row.distance_km))),
+    isOnline: showActive ? isOnline(id, row.last_active_at) : null, // null = người này ẩn trạng thái hoạt động
+    lastActiveAt: showActive ? row.last_active_at ?? null : null,
     avatarUrl: photos[0]?.url || null,
     photos,
     interests: extras.interests.get(id) || [],
@@ -93,7 +110,7 @@ function missingForCompletion(row, photoCount, interestCount) {
 /** Hồ sơ đầy đủ của chính mình. */
 async function getMe(userId) {
   const [row] = await db.query(
-    `SELECT u.id, u.email, u.phone, u.role, u.created_at,
+    `SELECT u.id, u.email, u.email_verified_at, u.phone, u.role, u.created_at, u.push_enabled, u.password_changed_at,
             ${PUBLIC_PROFILE_COLUMNS}, p.latitude, p.longitude, p.weight_kg, p.completed_at,
             pr.interested_in, pr.min_age, pr.max_age, pr.max_distance_km
        FROM users u
@@ -111,9 +128,12 @@ async function getMe(userId) {
   return {
     ...toPublicProfile(row, extras),
     gender: row.gender, // của chính mình thì luôn thấy
+    isOnline: true,
+    lastActiveAt: row.last_active_at ?? null,
     showGender: Boolean(Number(row.show_gender)),
     weightKg: row.weight_kg == null ? null : Number(row.weight_kg),
     email: row.email,
+    emailVerified: Boolean(row.email_verified_at),
     phone: row.phone,
     role: row.role,
     birthday: row.birthday,
@@ -125,6 +145,13 @@ async function getMe(userId) {
       maxAge: row.max_age,
       maxDistanceKm: row.max_distance_km,
     },
+    // Các công tắc ở màn Cài đặt (đổi bằng PUT /users/me/settings)
+    settings: {
+      pushEnabled: Boolean(Number(row.push_enabled)),
+      showActiveStatus: Boolean(Number(row.show_active_status)),
+      showDistance: Boolean(Number(row.show_distance)),
+    },
+    passwordChangedAt: row.password_changed_at || row.created_at,
     // App dùng sau khi đăng nhập: completed = false -> đưa về màn hình onboarding còn thiếu
     onboarding: {
       completed: Boolean(row.completed_at),
@@ -159,7 +186,30 @@ async function getPublicProfile(viewerId, targetId) {
     [viewerId, targetId],
   );
   if (!row) throw ApiError.notFound('Không tìm thấy người dùng');
-  return toPublicProfile(row, await loadExtras([targetId]));
+  return { ...toPublicProfile(row, await loadExtras([targetId])), relation: await getRelation(viewerId, targetId) };
+}
+
+/**
+ * Quan hệ giữa mình và người kia - để app biết hiện nút nào trên trang hồ sơ:
+ *   matched + matchId : đã tương hợp -> nút Nhắn tin (GET /chats/:matchId)
+ *   likedMe           : người đó đã thích mình (đang nằm trong tab Lượt thích) -> nút Thích lại / Bỏ qua
+ *   myAction          : mình đã quẹt gì (like | superlike | pass | null)
+ */
+async function getRelation(viewerId, targetId) {
+  const swipes = await db.query(
+    'SELECT swiper_id, action FROM swipes WHERE (swiper_id = ? AND swiped_id = ?) OR (swiper_id = ? AND swiped_id = ?)',
+    [viewerId, targetId, targetId, viewerId],
+  );
+  const mine = swipes.find((r) => Number(r.swiper_id) === Number(viewerId));
+  const theirs = swipes.find((r) => Number(r.swiper_id) === Number(targetId));
+  const [u1, u2] = Number(viewerId) < Number(targetId) ? [viewerId, targetId] : [targetId, viewerId];
+  const [match] = await db.query('SELECT id FROM matches WHERE user1_id = ? AND user2_id = ? AND unmatched_at IS NULL', [u1, u2]);
+  return {
+    matched: Boolean(match),
+    matchId: match ? Number(match.id) : null,
+    likedMe: Boolean(theirs && theirs.action !== 'pass'),
+    myAction: mine ? mine.action : null,
+  };
 }
 
 // Map tên field camelCase (API) -> snake_case (DB)
@@ -322,6 +372,9 @@ const COMPLETION_MESSAGES = {
 
 module.exports = {
   PUBLIC_PROFILE_COLUMNS,
+  toPhotoUrl,
+  isOnline,
+  getRelation,
   completeOnboarding,
   loadExtras,
   toPublicProfile,

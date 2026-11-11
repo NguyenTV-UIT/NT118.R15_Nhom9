@@ -79,6 +79,23 @@ const OPTIONS = {
   ],
 };
 
+/** Lý do báo cáo - màn ReportUser. */
+OPTIONS.reportReason = [
+  ['fake_profile', 'Ảnh giả hoặc mạo danh'],
+  ['sexual_content', 'Nội dung nhạy cảm, khiêu dâm'],
+  ['harassment', 'Quấy rối hoặc bắt nạt'],
+  ['scam_spam', 'Lừa đảo hoặc spam'],
+  ['underage', 'Có vẻ chưa đủ 18 tuổi'],
+  ['other', 'Lý do khác'],
+];
+/** Lý do rời đi - màn DeleteAccount. */
+OPTIONS.deleteReason = [
+  ['found_match', 'Mình đã tìm được người phù hợp'],
+  ['taking_break', 'Mình muốn nghỉ một thời gian'],
+  ['privacy', 'Mình gặp vấn đề về quyền riêng tư'],
+  ['other', 'Lý do khác'],
+];
+
 /** 20 sở thích trên màn hình Interests của app (thứ tự như app). */
 const APP_INTERESTS = [
   'Du lịch', 'Âm nhạc', 'Xem phim và series', 'Đọc sách', 'Nấu ăn',

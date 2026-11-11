@@ -1,8 +1,13 @@
 const authService = require('./auth.service');
+const { describeDevice } = require('../sessions/sessions.service');
 const { ok, created } = require('../../utils/response');
 
+exports.sendRegisterOtp = async (req, res) => {
+  ok(res, await authService.sendRegisterOtp(req.body), 'Đã gửi mã OTP tới email của bạn');
+};
+
 exports.register = async (req, res) => {
-  created(res, await authService.register(req.body), 'Đăng ký thành công, hãy hoàn tất hồ sơ');
+  created(res, await authService.register(req.body, describeDevice(req)), 'Đăng ký thành công, hãy hoàn tất hồ sơ');
 };
 
 exports.forgotPassword = async (req, res) => {
@@ -14,11 +19,20 @@ exports.verifyResetOtpEmail = async (req, res) => {
 };
 
 exports.login = async (req, res) => {
-  ok(res, await authService.login(req.body), 'Đăng nhập thành công');
+  const result = await authService.login(req.body, describeDevice(req));
+  ok(res, result, result.otpRequired ? 'Đã gửi mã OTP tới email, vui lòng nhập để đăng nhập' : 'Đăng nhập thành công');
+};
+
+exports.resendLoginOtp = async (req, res) => {
+  ok(res, await authService.resendLoginOtp(req.body), 'Đã gửi lại mã OTP đăng nhập');
+};
+
+exports.verifyLoginOtpEmail = async (req, res) => {
+  ok(res, await authService.verifyEmailLoginOtp(req.body, describeDevice(req)), 'Đăng nhập thành công');
 };
 
 exports.refresh = async (req, res) => {
-  ok(res, await authService.refresh(req.body.refreshToken), 'Làm mới token thành công');
+  ok(res, await authService.refresh(req.body.refreshToken, describeDevice(req)), 'Làm mới token thành công');
 };
 
 exports.logout = async (req, res) => {
@@ -27,8 +41,8 @@ exports.logout = async (req, res) => {
 };
 
 exports.changePassword = async (req, res) => {
-  await authService.changePassword(req.user.id, req.body);
-  ok(res, null, 'Đổi mật khẩu thành công, vui lòng đăng nhập lại trên các thiết bị khác');
+  const result = await authService.changePassword(req.user, req.body);
+  ok(res, result, 'Đổi mật khẩu thành công, các thiết bị khác đã được đăng xuất');
 };
 
 // ── Số điện thoại + OTP ──
@@ -43,16 +57,16 @@ exports.sendOtp = async (req, res) => {
 };
 
 exports.registerPhone = async (req, res) => {
-  created(res, await authService.registerByPhone(req.body), 'Đăng ký thành công, hãy hoàn tất hồ sơ');
+  created(res, await authService.registerByPhone(req.body, describeDevice(req)), 'Đăng ký thành công, hãy hoàn tất hồ sơ');
 };
 
 exports.loginPhone = async (req, res) => {
-  const result = await authService.loginByPhone(req.body);
+  const result = await authService.loginByPhone(req.body, describeDevice(req));
   ok(res, result, result.otpRequired ? 'Đã gửi mã OTP, vui lòng nhập để đăng nhập' : 'Đăng nhập thành công');
 };
 
 exports.loginPhoneVerify = async (req, res) => {
-  ok(res, await authService.verifyLoginOtp(req.body), 'Đăng nhập thành công');
+  ok(res, await authService.verifyLoginOtp(req.body, describeDevice(req)), 'Đăng nhập thành công');
 };
 
 exports.verifyResetOtp = async (req, res) => {

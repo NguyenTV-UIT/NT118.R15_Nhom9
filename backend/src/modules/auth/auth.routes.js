@@ -17,6 +17,11 @@ const verifyLimit = rateLimit({ name: 'verify', windowSec: 60, max: 15 });
 router.post('/register', loginLimit, validate({ body: schema.register }), h(ctrl.register));
 router.post('/login', loginLimit, validate({ body: schema.login }), h(ctrl.login));
 
+// OTP cho đăng ký / đăng nhập (tuỳ chọn - bật bằng REGISTER_OTP_REQUIRED / EMAIL_LOGIN_OTP_REQUIRED)
+router.post('/register/send-otp', otpLimit, validate({ body: schema.emailOnly }), h(ctrl.sendRegisterOtp));
+router.post('/login/resend-otp', otpLimit, validate({ body: schema.emailOnly }), h(ctrl.resendLoginOtp));
+router.post('/login/verify-otp', verifyLimit, validate({ body: schema.emailOtp }), h(ctrl.verifyLoginOtpEmail));
+
 // Quên mật khẩu: email -> OTP -> resetToken -> mật khẩu mới
 router.post('/password/forgot', otpLimit, validate({ body: schema.forgotPassword }), h(ctrl.forgotPassword));
 router.post('/password/verify-otp', verifyLimit, validate({ body: schema.verifyResetOtpEmail }), h(ctrl.verifyResetOtpEmail));

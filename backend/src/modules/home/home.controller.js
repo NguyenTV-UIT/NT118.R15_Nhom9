@@ -29,8 +29,13 @@ exports.swipe = async (req, res) => {
   ok(res, result, result.matched ? "It's a match!" : 'Đã ghi nhận');
 };
 
+exports.getLikes = async (req, res) => {
+  const { items, meta } = await homeService.getLikes(req.user.id, req.query.limit);
+  ok(res, items, items.length ? 'OK' : 'Chưa có ai thích bạn hôm nay', 200, meta);
+};
+
 exports.getMatches = async (req, res) => {
-  ok(res, await homeService.getMatches(req.user.id));
+  ok(res, await homeService.getMatches(req.user.id, req.query));
 };
 
 exports.unmatch = async (req, res) => {

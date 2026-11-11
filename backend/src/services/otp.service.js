@@ -1,7 +1,7 @@
 /**
  * MÃ OTP 6 SỐ gửi qua EMAIL hoặc SMS (target có "@" -> email, ngược lại -> SMS).
- * Mục đích: reset_password (quên mật khẩu qua email - đang dùng);
- *           register / login (đăng ký / đăng nhập bằng SĐT - đang tạm ngừng).
+ * Mục đích (purpose): reset_password (quên mật khẩu), change_email / change_email_new (đổi email),
+ *                     register / login (xác thực khi đăng ký / đăng nhập - tuỳ chọn).
  *
  * - Mã lưu dạng băm SHA-256 (không lưu mã gốc), hết hạn sau OTP_TTL_SECONDS (mặc định 5 phút)
  * - Gửi lại sau OTP_RESEND_SECONDS (30 giây, khớp đồng hồ đếm ngược trên app)
@@ -22,6 +22,8 @@ const PURPOSE_TEXT = {
   register: 'đăng ký tài khoản',
   login: 'đăng nhập',
   reset_password: 'đặt lại mật khẩu',
+  change_email: 'đổi email',
+  change_email_new: 'xác nhận email mới',
 };
 
 const hashCode = (target, purpose, code) => crypto.createHash('sha256').update(`${target}:${purpose}:${code}`).digest('hex');
@@ -52,22 +54,30 @@ async function send(target, purpose) {
     'UPDATE otp_codes SET consumed_at = UTC_TIMESTAMP() WHERE target = ? AND purpose = ? AND consumed_at IS NULL',
     [target, purpose],
   );
-  await db.query(
+  const inserted = await db.query(
     `INSERT INTO otp_codes (target, purpose, code_hash, expires_at)
      VALUES (?, ?, ?, UTC_TIMESTAMP() + INTERVAL ? SECOND)`,
     [target, purpose, hashCode(target, purpose, code), env.otp.ttlSeconds],
   );
   const minutes = Math.round(env.otp.ttlSeconds / 60);
-  if (isEmail(target)) {
-    await mail.send(
-      target,
-      `[DateZone] Mã xác thực ${PURPOSE_TEXT[purpose]}: ${code}`,
-      `Xin chào,\n\nMã xác thực ${PURPOSE_TEXT[purpose]} DateZone của bạn là: ${code}\n` +
-        `Mã có hiệu lực trong ${minutes} phút. Không chia sẻ mã này cho bất kỳ ai.\n\n` +
-        'Nếu bạn không yêu cầu, hãy bỏ qua email này.\n\nDateZone',
-    );
-  } else {
-    await sms.send(target, `[DateZone] Ma xac thuc ${PURPOSE_TEXT[purpose]} cua ban la ${code}. Ma het han sau ${minutes} phut.`);
+  try {
+    if (isEmail(target)) {
+      await mail.send(
+        target,
+        `[DateZone] Mã xác thực ${PURPOSE_TEXT[purpose]}: ${code}`,
+        `Xin chào,\n\nMã xác thực ${PURPOSE_TEXT[purpose]} DateZone của bạn là: ${code}\n` +
+          `Mã có hiệu lực trong ${minutes} phút. Không chia sẻ mã này cho bất kỳ ai.\n\n` +
+          'Nếu bạn không yêu cầu, hãy bỏ qua email này.\n\nDateZone',
+      );
+    } else {
+      await sms.send(target, `[DateZone] Ma xac thuc ${PURPOSE_TEXT[purpose]} cua ban la ${code}. Ma het han sau ${minutes} phut.`);
+    }
+  } catch (err) {
+    // Gửi thất bại (sai cấu hình SMTP, mất mạng...): xoá mã vừa tạo để người dùng gửi lại được ngay,
+    // không bị tính thời gian chờ 30 giây cho một mã họ chưa từng nhận.
+    await db.query('DELETE FROM otp_codes WHERE id = ?', [inserted.insertId]).catch(() => {});
+    console.error(`[otp] Không gửi được mã tới ${target}:`, err.message);
+    throw new ApiError(502, 'Không gửi được mã xác thực, vui lòng thử lại sau ít phút', 'OTP_SEND_FAILED');
   }
 
   return {

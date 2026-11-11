@@ -4,6 +4,10 @@ const { ageFromBirthday } = require('../../utils/age');
 const usersService = require('../users/users.service');
 const matching = require('./matching');
 const taste = require('./taste');
+const chats = require('../chats/chats.service');
+const safety = require('../safety/safety.service');
+const hub = require('../../realtime/hub');
+const push = require('../../services/push');
 
 const CANDIDATE_POOL = 300; // số ứng viên tối đa lấy ra để chấm điểm mỗi lần
 const MIN_FEED = 5; // feed mặc định có ít hơn số này thì tự nới filter (Mức 3)
@@ -15,10 +19,19 @@ const WIDEN_STEPS = [
 ];
 const MAX_WIDEN_KM = 500;
 
+const LIFESTYLE_COLUMNS = {
+  relationshipGoal: 'relationship_goal',
+  zodiac: 'zodiac',
+  smoking: 'smoking',
+  drinking: 'drinking',
+  exercise: 'exercise',
+  education: 'education',
+};
+
 /** Thông tin người xem: giới tính, vị trí, tuổi, sở thích, tiêu chí đã lưu. */
 async function loadViewer(userId) {
   const [row] = await db.query(
-    `SELECT p.gender, p.birthday, p.latitude, p.longitude, p.completed_at,
+    `SELECT p.gender, p.birthday, p.latitude, p.longitude, p.city, p.completed_at,
             pr.interested_in, pr.min_age, pr.max_age, pr.max_distance_km
        FROM profiles p LEFT JOIN preferences pr ON pr.user_id = p.user_id
       WHERE p.user_id = ?`,
@@ -43,6 +56,7 @@ async function loadViewer(userId) {
     age: ageFromBirthday(row.birthday),
     lat: row.latitude == null ? null : Number(row.latitude),
     lng: row.longitude == null ? null : Number(row.longitude),
+    city: row.city || null,
     interestIds,
     prefs: {
       gender: row.interested_in || 'everyone',
@@ -55,8 +69,10 @@ async function loadViewer(userId) {
 
 /**
  * Lõi tìm ứng viên: lọc bằng SQL rồi chấm điểm bằng matching.js.
- * filters: { gender, minAge, maxAge, maxDistanceKm, strictDistance, interestIds, city, q,
- *            hasPhoto, sort: 'score'|'distance'|'newest'|'active', limit }
+ * filters: { gender, minAge, maxAge, maxDistanceKm, strictDistance, interestIds, city, sameCity, q, hasPhoto,
+ *            relationshipGoal[], zodiac[], smoking[], drinking[], exercise[], education[],
+ *            minHeight, maxHeight, minWeight, maxWeight,
+ *            sort: 'score'|'distance'|'newest'|'active', limit }
  * userTaste: gu đã học (taste.js) hoặc null -> chấm điểm cá nhân hoá
  */
 async function findCandidates(viewer, f, userTaste = null) {
@@ -108,6 +124,31 @@ async function findCandidates(viewer, f, userTaste = null) {
   if (f.hasPhoto) {
     where.push('EXISTS (SELECT 1 FROM photos ph WHERE ph.user_id = u.id)');
   }
+  if (f.sameCity && viewer.city) {
+    where.push('LOWER(p.city) = LOWER(?)');
+    params.push(viewer.city);
+  }
+  // Bộ lọc nâng cao (màn Filters bước 2): mỗi mục chọn được nhiều giá trị, không gửi = "Không quan trọng"
+  for (const [key, column] of Object.entries(LIFESTYLE_COLUMNS)) {
+    if (f[key]?.length) {
+      where.push(`p.${column} IN (?)`);
+      params.push(f[key]);
+    }
+  }
+  // Lọc theo chiều cao / cân nặng: người chưa khai thì không lọt. Cân nặng chỉ dùng để lọc, không trả về trong hồ sơ.
+  for (const [min, max, column] of [
+    ['minHeight', 'maxHeight', 'height_cm'],
+    ['minWeight', 'maxWeight', 'weight_kg'],
+  ]) {
+    if (f[min] != null) {
+      where.push(`p.${column} >= ?`);
+      params.push(f[min]);
+    }
+    if (f[max] != null) {
+      where.push(`p.${column} <= ?`);
+      params.push(f[max]);
+    }
+  }
 
   const poolOrder = {
     distance: '(distance_km IS NULL), distance_km, u.id DESC',
@@ -115,7 +156,7 @@ async function findCandidates(viewer, f, userTaste = null) {
   }[f.sort] || 'u.last_active_at DESC, u.id DESC';
 
   const rows = await db.query(
-    `SELECT u.id, u.last_active_at, u.created_at,
+    `SELECT u.id, u.created_at,
             ${usersService.PUBLIC_PROFILE_COLUMNS},
             ${distanceExpr} AS distance_km,
             ${commonExpr} AS common_interests,
@@ -182,8 +223,9 @@ function buildReasons(profile, c, { myInterests, taste: t }) {
       reasons.push('Đúng độ tuổi bạn hay thích');
     }
   }
-  if (c.distanceKm != null && c.distanceKm < 5) reasons.push(`Cách bạn ${profile.distanceKm} km`);
-  if (c.lastActiveAt && Date.now() - new Date(c.lastActiveAt).getTime() < 24 * 3600 * 1000) {
+  // profile.distanceKm = null khi người đó tắt "Hiện khoảng cách" -> không tiết lộ qua lý do gợi ý
+  if (profile.distanceKm != null && c.distanceKm < 5) reasons.push(`Cách bạn ${profile.distanceKm} km`);
+  if (profile.lastActiveAt && Date.now() - new Date(profile.lastActiveAt).getTime() < 24 * 3600 * 1000) {
     reasons.push('Vừa hoạt động');
   }
   return reasons.slice(0, 3);
@@ -229,8 +271,12 @@ async function getFeed(userId, limit) {
       maxAge: Math.min(100, base.maxAge + step.ageDelta),
       maxDistanceKm: base.maxDistanceKm ? Math.min(MAX_WIDEN_KM, base.maxDistanceKm * step.distanceFactor) : null,
     };
-    items = await findCandidates(viewer, f, userTaste);
-    expanded = { step: i + 1, minAge: f.minAge, maxAge: f.maxAge, maxDistanceKm: f.maxDistanceKm };
+    const wider = await findCandidates(viewer, f, userTaste);
+    // Chỉ coi là "đã mở rộng" khi thật sự tìm thêm được người
+    if (wider.length > items.length) {
+      items = wider;
+      expanded = { step: i + 1, minAge: f.minAge, maxAge: f.maxAge, maxDistanceKm: f.maxDistanceKm };
+    }
   }
 
   if (expanded) {
@@ -272,13 +318,29 @@ async function search(userId, query) {
     city: query.city,
     q: query.q,
     hasPhoto: query.hasPhoto,
+    sameCity: query.sameCity,
+    relationshipGoal: query.relationshipGoal,
+    zodiac: query.zodiac,
+    smoking: query.smoking,
+    drinking: query.drinking,
+    exercise: query.exercise,
+    education: query.education,
+    minHeight: query.minHeight,
+    maxHeight: query.maxHeight,
+    minWeight: query.minWeight,
+    maxWeight: query.maxWeight,
     sort: query.sort,
     limit: query.limit,
   };
+  // Bộ lọc app có hiển thị nhưng hồ sơ chưa có dữ liệu tương ứng -> bỏ qua và báo lại trong meta
+  const ignoredFilters = [];
+  if (query.orientation) ignoredFilters.push({ filter: 'orientation', reason: 'Hồ sơ chưa có thông tin xu hướng tính dục' });
+  if (query.sameDistrict) ignoredFilters.push({ filter: 'sameDistrict', reason: 'Hồ sơ chưa có thông tin quận / huyện' });
+  if (query.sameCity && !viewer.city) ignoredFilters.push({ filter: 'sameCity', reason: 'Bạn chưa cập nhật thành phố trong hồ sơ' });
   if (f.minAge > f.maxAge) throw ApiError.badRequest('minAge phải nhỏ hơn hoặc bằng maxAge');
   const userTaste = await taste.getTaste(userId);
   const items = await findCandidates(viewer, f, userTaste);
-  return { items, meta: { personalization: personalizationMeta(userTaste, await countSwipes(userId)) } };
+  return { items, meta: { personalization: personalizationMeta(userTaste, await countSwipes(userId)), ignoredFilters } };
 }
 
 /** Gu đã học của người dùng (tính lại ngay), kèm tên sở thích - cho màn hình "Gu của bạn" / báo cáo. */
@@ -325,6 +387,8 @@ async function swipe(userId, targetId, action) {
   if (await usersService.isBlockedBetween(userId, targetId)) throw ApiError.notFound('Không tìm thấy người dùng');
 
   const result = await db.transaction(async (conn) => {
+    const [[previous]] = await conn.query('SELECT action FROM swipes WHERE swiper_id = ? AND swiped_id = ?', [userId, targetId]);
+    const alreadyLiked = Boolean(previous && previous.action !== 'pass');
     await conn.query(
       `INSERT INTO swipes (swiper_id, swiped_id, action) VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE action = VALUES(action), created_at = UTC_TIMESTAMP()`,
@@ -337,14 +401,17 @@ async function swipe(userId, targetId, action) {
       [targetId, userId],
     );
 
-    if (action === 'superlike') {
-      await conn.query('INSERT INTO notifications (user_id, type, payload) VALUES (?, ?, ?)', [
-        targetId,
-        'super_like',
-        JSON.stringify({ fromUserId: userId }),
-      ]);
+    if (!liked) {
+      // Người kia chưa thích mình: mình xuất hiện trong tab "Lượt thích" của họ (GET /home/likes)
+      if (!alreadyLiked) {
+        await conn.query('INSERT INTO notifications (user_id, type, payload) VALUES (?, ?, ?)', [
+          targetId,
+          action === 'superlike' ? 'super_like' : 'new_like',
+          JSON.stringify({ fromUserId: userId }),
+        ]);
+      }
+      return { matched: false, notifyLike: !alreadyLiked };
     }
-    if (!liked) return { matched: false };
 
     const [u1, u2] = userId < targetId ? [userId, targetId] : [targetId, userId];
     const [[existing]] = await conn.query(
@@ -369,60 +436,118 @@ async function swipe(userId, targetId, action) {
         [targetId, 'new_match', JSON.stringify({ matchId, userId })],
       ],
     ]);
-    return { matched: true, matchId };
+    return { matched: true, matchId, isNew: true };
   });
+  const { notifyLike, isNew } = result;
+  delete result.notifyLike;
+  delete result.isNew;
 
   // Cập nhật gu (mỗi 10 lượt quẹt) - chạy nền, không làm chậm response
   taste.maybeUpdate(userId).catch((err) => console.error('[taste]', err.message));
 
   if (result.matched) {
     result.user = await usersService.getPublicProfile(userId, targetId);
+    if (isNew) announceMatch(userId, targetId, result.matchId).catch((err) => console.error('[match]', err.message));
+  } else if (notifyLike) {
+    announceLike(userId, targetId, action).catch((err) => console.error('[like]', err.message));
   }
   return result;
 }
 
-/** Danh sách những người đã match (kèm tin nhắn cuối cùng nếu có). */
-async function getMatches(userId) {
-  const rows = await db.query(
-    `SELECT m.id AS match_id, m.created_at AS matched_at,
-            u.id, ${usersService.PUBLIC_PROFILE_COLUMNS},
-            NULL AS distance_km,
-            lm.content AS last_message, lm.type AS last_message_type,
-            lm.sender_id AS last_sender_id, lm.created_at AS last_message_at
-       FROM matches m
-       JOIN users u    ON u.id = IF(m.user1_id = ?, m.user2_id, m.user1_id)
-       JOIN profiles p ON p.user_id = u.id
-       LEFT JOIN messages lm ON lm.id = (SELECT MAX(id) FROM messages WHERE match_id = m.id)
-      WHERE (m.user1_id = ? OR m.user2_id = ?)
-        AND m.unmatched_at IS NULL
-        AND u.status = 'active'
-      ORDER BY COALESCE(lm.created_at, m.created_at) DESC`,
-    [userId, userId, userId],
-  );
-
-  const extras = await usersService.loadExtras(rows.map((r) => Number(r.id)));
-  return rows.map((r) => ({
-    matchId: Number(r.match_id),
-    matchedAt: r.matched_at,
-    user: usersService.toPublicProfile(r, extras),
-    lastMessage: r.last_message
-      ? {
-          content: r.last_message,
-          type: r.last_message_type,
-          fromMe: Number(r.last_sender_id) === userId,
-          createdAt: r.last_message_at,
-        }
-      : null,
-  }));
+/** Báo cho người được thích: realtime nếu đang mở app (cập nhật tab Lượt thích), không thì thông báo đẩy. */
+async function announceLike(userId, targetId, action) {
+  const superlike = action === 'superlike';
+  const delivered = hub.sendToUser(targetId, 'like.new', { userId: Number(userId), superlike });
+  if (!delivered) {
+    await push.notify(targetId, {
+      type: superlike ? 'super_like' : 'new_like',
+      title: 'DateZone',
+      body: superlike ? 'Có người vừa siêu thích bạn ⭐' : 'Có người vừa thích bạn ❤️',
+      data: { fromUserId: Number(userId) },
+    });
+  }
 }
 
+/** Tương hợp mới: người quẹt nhận kết quả ngay trong response, người kia nhận sự kiện match.new / thông báo đẩy. */
+async function announceMatch(userId, targetId, matchId) {
+  const me = await usersService.getPublicProfile(targetId, userId); // hồ sơ của mình dưới góc nhìn người kia
+  const delivered = hub.sendToUser(targetId, 'match.new', { matchId, user: me });
+  if (!delivered) {
+    await push.notify(targetId, {
+      type: 'new_match',
+      title: 'Tương hợp mới! 🎉',
+      body: `Bạn và ${me.displayName} đã thích nhau. Gửi lời chào ngay!`,
+      data: { matchId, userId: Number(userId) },
+    });
+  }
+}
+
+const VN_OFFSET_MS = 7 * 3600 * 1000;
+const dayNumber = (date) => Math.floor((new Date(date).getTime() + VN_OFFSET_MS) / 86400000); // ngày theo giờ Việt Nam
+
+/**
+ * GET /home/likes - tab Lượt thích (MatchesActivity): những người đã thích mình mà mình CHƯA quẹt.
+ * Thích lại / bỏ qua: POST /home/swipe { targetId, action: like | pass } (thích lại là thành tương hợp ngay).
+ * Mỗi người có likedAt, superlike và group: today | yesterday | earlier (theo giờ Việt Nam) để chia nhóm.
+ */
+async function getLikes(userId, limit) {
+  await loadViewer(userId); // chưa hoàn tất hồ sơ thì chưa xem được
+  const base = `FROM swipes s
+       JOIN users u    ON u.id = s.swiper_id
+       JOIN profiles p ON p.user_id = u.id
+       LEFT JOIN profiles me ON me.user_id = s.swiped_id
+      WHERE s.swiped_id = ? AND s.action IN ('like','superlike')
+        AND u.status = 'active' AND p.completed_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM swipes mine WHERE mine.swiper_id = s.swiped_id AND mine.swiped_id = u.id)
+        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = s.swiped_id AND b.blocked_id = u.id)
+                                                  OR (b.blocker_id = u.id AND b.blocked_id = s.swiped_id))`;
+  const rows = await db.query(
+    `SELECT u.id, ${usersService.PUBLIC_PROFILE_COLUMNS}, s.action, s.created_at AS liked_at,
+            CASE WHEN p.latitude IS NULL OR me.latitude IS NULL THEN NULL
+                 ELSE ST_Distance_Sphere(POINT(p.longitude, p.latitude), POINT(me.longitude, me.latitude)) / 1000
+            END AS distance_km
+       ${base}
+      ORDER BY s.created_at DESC, u.id DESC
+      LIMIT ?`,
+    [userId, limit],
+  );
+  const [{ total }] = await db.query(`SELECT COUNT(*) AS total ${base}`, [userId]);
+
+  const today = dayNumber(Date.now());
+  const extras = await usersService.loadExtras(rows.map((r) => Number(r.id)));
+  const items = rows.map((r) => {
+    const diff = today - dayNumber(r.liked_at);
+    return {
+      ...usersService.toPublicProfile(r, extras),
+      likedAt: r.liked_at,
+      superlike: r.action === 'superlike',
+      group: diff <= 0 ? 'today' : diff === 1 ? 'yesterday' : 'earlier',
+    };
+  });
+  return { items, meta: { total: Number(total), today: items.filter((i) => i.group === 'today').length } };
+}
+
+/**
+ * GET /home/matches - những người đã tương hợp, kèm tin nhắn cuối, số tin chưa đọc, độ thân thiết.
+ *   sort=activity (mặc định): theo hoạt động gần nhất  |  sort=recent: mới tương hợp trước ("Tương hợp gần đây")
+ *   newOnly=true: chỉ người chưa nhắn tin nào   |  limit
+ */
+async function getMatches(userId, { sort = 'activity', newOnly = false, limit = 100 } = {}) {
+  let items = await chats.listConversations(userId);
+  if (newOnly) items = items.filter((c) => !c.lastMessage);
+  if (sort === 'recent') items = [...items].sort((a, b) => new Date(b.matchedAt) - new Date(a.matchedAt) || b.matchId - a.matchId);
+  return items.slice(0, limit);
+}
+
+/** DELETE /home/matches/:matchId - huỷ tương hợp: cuộc trò chuyện biến mất ở cả 2 phía. */
 async function unmatch(userId, matchId) {
-  const result = await db.query(
-    `UPDATE matches SET unmatched_at = UTC_TIMESTAMP()
-      WHERE id = ? AND (user1_id = ? OR user2_id = ?) AND unmatched_at IS NULL`,
+  const [match] = await db.query(
+    'SELECT user1_id, user2_id FROM matches WHERE id = ? AND (user1_id = ? OR user2_id = ?) AND unmatched_at IS NULL',
     [matchId, userId, userId],
   );
-  if (!result.affectedRows) throw ApiError.notFound('Không tìm thấy match');
+  if (!match) throw ApiError.notFound('Không tìm thấy match');
+  const partnerId = Number(match.user1_id) === Number(userId) ? match.user2_id : match.user1_id;
+  await safety.removeMatchBetween(userId, Number(partnerId));
 }
 
-module.exports = { getFeed, search, getTasteSummary, swipe, getMatches, unmatch, findCandidates, loadViewer };
+module.exports = { getFeed, search, getTasteSummary, swipe, getLikes, getMatches, unmatch, findCandidates, loadViewer };

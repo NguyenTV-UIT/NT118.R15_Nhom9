@@ -56,7 +56,9 @@ public class VerifyCurrentEmailActivity extends AppCompatActivity {
         edtCurrentEmail = findViewById(R.id.edtCurrentEmailInput);
 
         SharedPreferences prefs = getSharedPreferences(ProfileEditActivity.PREFS_NAME, Context.MODE_PRIVATE);
-        String savedEmail = prefs.getString("KEY_SAVED_EMAIL", "minhanh.new@gmail.com");
+        // Email thật của tài khoản đang đăng nhập (không còn dùng email mẫu)
+        org.json.JSONObject sessionUser = new com.datezone.app.api.SessionStore(this).user();
+        String savedEmail = sessionUser.isNull("email") ? "" : sessionUser.optString("email", "");
         if (edtCurrentEmail != null && !TextUtils.isEmpty(savedEmail)) {
             edtCurrentEmail.setText(savedEmail);
         }
@@ -86,11 +88,15 @@ public class VerifyCurrentEmailActivity extends AppCompatActivity {
             return;
         }
 
-        Toast.makeText(this, "Đã gửi mã OTP tới " + emailStr, Toast.LENGTH_SHORT).show();
-
-        Intent intent = new Intent(VerifyCurrentEmailActivity.this, OtpVerificationActivity.class);
-        intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_VERIFY_CURRENT_EMAIL);
-        intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, emailStr);
-        startActivity(intent);
+        // POST /users/me/email/verify-current - máy chủ kiểm tra đúng email hiện tại rồi mới gửi OTP
+        com.datezone.app.api.ApiUi.send(this, R.id.btnSendOtpToCurrentEmail, true, "POST", "users/me/email/verify-current",
+                com.datezone.app.api.ApiUi.data("email", emailStr), response -> {
+                    Toast.makeText(this, "Đã gửi mã OTP tới " + emailStr, Toast.LENGTH_SHORT).show();
+                    Intent intent = new Intent(VerifyCurrentEmailActivity.this, OtpVerificationActivity.class);
+                    intent.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_VERIFY_CURRENT_EMAIL);
+                    intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, emailStr);
+                    intent.putExtra("resendAfter", response.getJSONObject("data").optInt("resendAfter", 30));
+                    startActivity(intent);
+                });
     }
 }

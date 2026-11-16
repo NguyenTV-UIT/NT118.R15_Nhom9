@@ -31,6 +31,32 @@ public class MatchItem {
         this.photos = photos;
     }
 
+    // ── Lượt thích thật từ máy chủ (GET /home/likes) ──
+    private long userId;
+    private String photoUrl;
+    private String remoteJson;
+
+    /** Thẻ của 1 người đã thích mình; remoteJson = hồ sơ công khai (JSON) để mở trang chi tiết. */
+    public MatchItem(long userId, String name, String photoUrl, String remoteJson) {
+        this.type = TYPE_CARD;
+        this.userId = userId;
+        this.name = name;
+        this.photoUrl = photoUrl;
+        this.remoteJson = remoteJson;
+    }
+
+    public long getUserId() {
+        return userId;
+    }
+
+    public String getPhotoUrl() {
+        return photoUrl;
+    }
+
+    public String getRemoteJson() {
+        return remoteJson;
+    }
+
     public int getType() {
         return type;
     }

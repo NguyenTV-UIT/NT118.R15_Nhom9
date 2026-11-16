@@ -40,6 +40,9 @@ public class ChatSearchActivity extends AppCompatActivity {
         int unreadCount;
         boolean isCloseFriend;
         int msgCount;
+        long matchId;
+        String photoUrl = "";
+        org.json.JSONObject user;
 
         public SearchItemModel(String name, String message, String time, int photoResId, int unreadCount, boolean isCloseFriend, int msgCount) {
             this.name = name;
@@ -98,9 +101,47 @@ public class ChatSearchActivity extends AppCompatActivity {
         }
 
         initViews();
-        initData();
         setupSearchAndFilterListeners();
         filterAndDisplayResults();
+        loadChats();
+    }
+
+    /** GET /chats - tải mọi cuộc trò chuyện 1 lần, lọc theo tên ngay trên máy khi gõ. */
+    private void loadChats() {
+        new com.datezone.app.api.ApiClient(this).request(this, "GET", "chats?limit=200", null, new com.datezone.app.api.ApiClient.Callback() {
+            @Override public void onSuccess(org.json.JSONObject response) throws Exception {
+                org.json.JSONArray items = response.getJSONArray("data");
+                masterList.clear();
+                for (int i = 0; i < items.length(); i++) {
+                    org.json.JSONObject chat = items.getJSONObject(i);
+                    org.json.JSONObject user = chat.getJSONObject("user");
+                    org.json.JSONObject last = chat.optJSONObject("lastMessage");
+                    org.json.JSONObject intimacy = chat.optJSONObject("intimacy");
+                    SearchItemModel item = new SearchItemModel(
+                            com.datezone.app.api.ChatUi.text(user, "displayName"),
+                            com.datezone.app.api.ChatUi.text(last, "preview"),
+                            last == null ? "" : com.datezone.app.api.ChatUi.timeLabel(last.optString("createdAt")),
+                            0, chat.optInt("unreadCount"),
+                            intimacy != null && intimacy.optBoolean("isCloseFriend"),
+                            intimacy == null ? 0 : intimacy.optInt("score"));
+                    item.matchId = chat.getLong("matchId");
+                    item.photoUrl = com.datezone.app.api.ChatUi.avatar(user);
+                    item.user = user;
+                    masterList.add(item);
+                }
+                filterAndDisplayResults();
+            }
+            @Override public void onError(String message) {
+                android.widget.Toast.makeText(ChatSearchActivity.this, message, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** Bỏ dấu tiếng Việt để gõ "binh" vẫn tìm ra "Bình". */
+    private static String fold(String text) {
+        if (text == null) return "";
+        String plain = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD).replaceAll("\\p{M}+", "");
+        return plain.replace('đ', 'd').replace('Đ', 'D').toLowerCase();
     }
 
     private void initViews() {
@@ -175,7 +216,7 @@ public class ChatSearchActivity extends AppCompatActivity {
             if (query.isEmpty()) {
                 filteredList.add(item);
             } else {
-                boolean matchesName = item.name != null && item.name.toLowerCase().contains(query);
+                boolean matchesName = item.name != null && (item.name.toLowerCase().contains(query) || fold(item.name).contains(fold(query)));
                 if (matchesName) {
                     filteredList.add(item);
                 }
@@ -219,7 +260,8 @@ public class ChatSearchActivity extends AppCompatActivity {
             );
             ivPhoto.setLayoutParams(photoParams);
             ivPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            ivPhoto.setImageResource(item.photoResId);
+            if (item.photoUrl != null && !item.photoUrl.isEmpty()) com.datezone.app.api.RemoteImages.load(ivPhoto, item.photoUrl);
+            else ivPhoto.setImageResource(item.photoResId != 0 ? item.photoResId : R.drawable.discovery_profile_placeholder);
 
             com.google.android.material.shape.ShapeAppearanceModel shapeModel = ivPhoto.getShapeAppearanceModel().toBuilder()
                     .setAllCorners(com.google.android.material.shape.CornerFamily.ROUNDED, 32 * densityDp)
@@ -249,6 +291,10 @@ public class ChatSearchActivity extends AppCompatActivity {
 
             // Mở khung chat khi chọn kết quả tìm kiếm
             itemRow.setOnClickListener(v -> {
+                if (item.matchId > 0) {
+                    startActivity(com.datezone.app.api.ChatUi.chatIntent(ChatSearchActivity.this, item.matchId, item.user));
+                    return;
+                }
                 Intent intent = new Intent(ChatSearchActivity.this, ChatDetailActivity.class);
                 intent.putExtra(ChatDetailActivity.EXTRA_NAME, item.name);
                 intent.putExtra(ChatDetailActivity.EXTRA_PHOTO_RES_ID, item.photoResId);

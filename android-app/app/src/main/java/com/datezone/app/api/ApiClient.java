@@ -133,7 +133,16 @@ public final class ApiClient {
         dispatch(owner, () -> executePhoto(uri), callback);
     }
 
+    /** Gửi 1 ảnh (multipart, field "photo") tới path bất kỳ, ví dụ chats/12/photos. */
+    public void uploadPhotoTo(Activity owner, String path, android.net.Uri uri, Callback callback) {
+        dispatch(owner, () -> executePhoto(path, uri), callback);
+    }
+
     JSONObject executePhoto(android.net.Uri uri) throws Exception {
+        return executePhoto("users/me/photos", uri);
+    }
+
+    JSONObject executePhoto(String path, android.net.Uri uri) throws Exception {
         String type = context.getContentResolver().getType(uri);
         if (type == null) type = java.net.URLConnection.guessContentTypeFromName(uri.getLastPathSegment());
         if (!"image/jpeg".equals(type) && !"image/png".equals(type) && !"image/webp".equals(type))
@@ -155,7 +164,7 @@ public final class ApiClient {
             }
         }
         out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-        return executePayload("POST", "users/me/photos", new Payload(out.toByteArray(), "multipart/form-data; boundary=" + boundary));
+        return executePayload("POST", path, new Payload(out.toByteArray(), "multipart/form-data; boundary=" + boundary));
     }
 
     private static Reply exchange(String method, String path, Payload body, String token) throws Exception {
@@ -166,6 +175,9 @@ public final class ApiClient {
             conn.setReadTimeout(15000);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestProperty("Accept", "application/json");
+            // Tên máy để màn "Thiết bị đang đăng nhập" hiển thị đúng (server đọc khi đăng nhập / đăng ký)
+            conn.setRequestProperty("X-Device-Platform", "android");
+            conn.setRequestProperty("X-Device-Name", deviceName());
             if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
             if (body != null) {
                 conn.setDoOutput(true);
@@ -184,6 +196,16 @@ public final class ApiClient {
                 return new Reply(status, new JSONObject(out.toString("UTF-8")));
             }
         } finally { conn.disconnect(); }
+    }
+
+    private static String deviceName() {
+        String maker = android.os.Build.MANUFACTURER == null ? "" : android.os.Build.MANUFACTURER;
+        String model = android.os.Build.MODEL == null ? "" : android.os.Build.MODEL;
+        String name = model.toLowerCase(java.util.Locale.ROOT).startsWith(maker.toLowerCase(java.util.Locale.ROOT))
+                ? model : (maker + " " + model).trim();
+        if (name.isEmpty()) name = "Android";
+        try { return java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20"); }
+        catch (java.io.UnsupportedEncodingException e) { return "Android"; }
     }
 
     private static final class Payload {

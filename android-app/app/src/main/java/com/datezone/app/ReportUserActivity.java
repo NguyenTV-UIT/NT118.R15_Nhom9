@@ -13,6 +13,9 @@ import androidx.core.view.WindowInsetsCompat;
 public class ReportUserActivity extends AppCompatActivity {
 
     public static final String EXTRA_NAME = "EXTRA_NAME";
+    /** id người bị báo cáo trên máy chủ; có thì gửi POST /users/:id/report. */
+    public static final String EXTRA_USER_ID = "EXTRA_USER_ID";
+    private long targetUserId;
 
     private String targetUserName = "Trương Vĩnh Nguyên";
 
@@ -63,7 +66,34 @@ public class ReportUserActivity extends AppCompatActivity {
         findViewById(R.id.btnReportBack).setOnClickListener(v -> finish());
 
         // Nút Báo cáo và chặn
-        findViewById(R.id.btnSubmitReport).setOnClickListener(v -> submitReportAndBlock());
+        targetUserId = intent != null ? intent.getLongExtra(EXTRA_USER_ID, 0) : 0;
+        findViewById(R.id.btnSubmitReport).setOnClickListener(v -> {
+            if (targetUserId > 0) sendReport();
+            else submitReportAndBlock();
+        });
+    }
+
+    /** POST /users/:id/report { reason, details } - máy chủ lưu báo cáo, chặn và huỷ tương hợp. */
+    private void sendReport() {
+        android.widget.RadioGroup group = findViewById(R.id.rgReportReasons);
+        int checked = group == null ? -1 : group.getCheckedRadioButtonId();
+        String reason = checked == R.id.rbReasonFakePhoto ? "fake_profile"
+                : checked == R.id.rbReasonSensitiveContent ? "sexual_content"
+                : checked == R.id.rbReasonHarassment ? "harassment"
+                : checked == R.id.rbReasonSpam ? "scam_spam"
+                : checked == R.id.rbReasonUnderage ? "underage"
+                : checked == R.id.rbReasonOther ? "other" : null;
+        if (reason == null) {
+            Toast.makeText(this, "Vui lòng chọn lý do báo cáo", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        android.widget.EditText edtDetails = findViewById(R.id.edtReportDescription);
+        String details = edtDetails == null ? "" : edtDetails.getText().toString().trim();
+        org.json.JSONObject body = com.datezone.app.api.ApiUi.data("reason", reason);
+        try { if (!details.isEmpty()) body.put("details", details); }
+        catch (org.json.JSONException ignored) { }
+        com.datezone.app.api.ApiUi.send(this, R.id.btnSubmitReport, true, "POST", "users/" + targetUserId + "/report", body,
+                response -> submitReportAndBlock());
     }
 
     private void submitReportAndBlock() {

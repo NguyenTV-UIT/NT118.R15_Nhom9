@@ -27,7 +27,25 @@ public class ActiveCallManager {
 
     public void endCall() {
         this.isCallActive = false;
+        this.callId = 0;
+        this.matchId = 0;
+        this.photoUrl = "";
     }
+
+    // ── Cuộc gọi thật (đã đăng ký với máy chủ) ──
+    private long callId;
+    private long matchId;
+    private String photoUrl = "";
+
+    public void setRemoteCall(long matchId, long callId, String photoUrl) {
+        this.matchId = matchId;
+        this.callId = callId;
+        this.photoUrl = photoUrl == null ? "" : photoUrl;
+    }
+
+    public long getCallId() { return callId; }
+    public long getMatchId() { return matchId; }
+    public String getPhotoUrl() { return photoUrl; }
 
     public boolean isCallActive() {
         return isCallActive;

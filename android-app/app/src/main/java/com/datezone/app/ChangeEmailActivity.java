@@ -14,6 +14,9 @@ import androidx.core.view.WindowInsetsCompat;
 
 public class ChangeEmailActivity extends AppCompatActivity {
 
+    /** Mã do máy chủ cấp sau khi xác thực OTP ở email hiện tại (hạn 10 phút). */
+    public static final String EXTRA_EMAIL_CHANGE_TOKEN = "EXTRA_EMAIL_CHANGE_TOKEN";
+
     private EditText edtNewEmail;
 
     @Override
@@ -81,9 +84,36 @@ public class ChangeEmailActivity extends AppCompatActivity {
             return;
         }
 
-        Intent intent = new Intent(ChangeEmailActivity.this, ChangeEmailSuccessActivity.class);
-        intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, newEmail);
-        startActivity(intent);
-        finish();
+        String token = getIntent() != null ? getIntent().getStringExtra(EXTRA_EMAIL_CHANGE_TOKEN) : null;
+        if (TextUtils.isEmpty(token)) {
+            Toast.makeText(this, "Vui lòng xác thực email hiện tại trước khi đổi email", Toast.LENGTH_LONG).show();
+            return;
+        }
+        // PUT /users/me/email - đổi sang email mới (lần đăng nhập sau dùng email này)
+        com.datezone.app.api.ApiUi.send(this, R.id.btnSendOtp, true, "PUT", "users/me/email",
+                com.datezone.app.api.ApiUi.data("emailChangeToken", token, "newEmail", newEmail), response -> {
+                    org.json.JSONObject data = response.getJSONObject("data");
+                    if (data.optBoolean("otpRequired")) {
+                        // Máy chủ bật EMAIL_CHANGE_VERIFY_NEW: nhập thêm OTP vừa gửi tới email mới
+                        Intent otp = new Intent(ChangeEmailActivity.this, OtpVerificationActivity.class);
+                        otp.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_CHANGE_EMAIL);
+                        otp.putExtra(OtpVerificationActivity.EXTRA_EMAIL, newEmail);
+                        otp.putExtra(OtpVerificationActivity.EXTRA_PENDING_TOKEN, data.getString("pendingToken"));
+                        otp.putExtra(OtpVerificationActivity.EXTRA_EMAIL_CHANGE_TOKEN, token);
+                        otp.putExtra("resendAfter", data.optInt("resendAfter", 30));
+                        startActivity(otp);
+                        finish();
+                        return;
+                    }
+                    String saved = data.optString("email", newEmail);
+                    com.datezone.app.api.SessionStore store = new com.datezone.app.api.SessionStore(this);
+                    org.json.JSONObject user = store.user();
+                    user.put("email", saved);
+                    store.saveUser(user);
+                    Intent intent = new Intent(ChangeEmailActivity.this, ChangeEmailSuccessActivity.class);
+                    intent.putExtra(OtpVerificationActivity.EXTRA_EMAIL, saved);
+                    startActivity(intent);
+                    finish();
+                });
     }
 }

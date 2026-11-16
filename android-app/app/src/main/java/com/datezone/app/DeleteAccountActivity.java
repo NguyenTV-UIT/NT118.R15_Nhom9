@@ -79,6 +79,20 @@ public class DeleteAccountActivity extends AppCompatActivity {
     }
 
     private void performDeleteAccount() {
+        String confirm = edtConfirmDeleteText != null ? edtConfirmDeleteText.getText().toString().trim() : "";
+        android.widget.RadioGroup group = findViewById(R.id.radioGroupDeleteReason);
+        int checked = group == null ? -1 : group.getCheckedRadioButtonId();
+        String reason = checked == R.id.radioReason1 ? "found_match" : checked == R.id.radioReason2 ? "taking_break"
+                : checked == R.id.radioReason3 ? "privacy" : checked == R.id.radioReason4 ? "other" : null;
+        // DELETE /users/me - máy chủ kiểm tra chữ XÓA rồi xoá vĩnh viễn; thành công mới dọn dữ liệu trên máy
+        com.datezone.app.api.ApiUi.send(this, R.id.btnConfirmDeleteAccountPermanently, true, "DELETE", "users/me",
+                com.datezone.app.api.ApiUi.data("confirm", confirm, "reason", reason), response -> {
+                    new com.datezone.app.api.SessionStore(this).clear();
+                    finishDeleteAccount();
+                });
+    }
+
+    private void finishDeleteAccount() {
         // Xóa sạch bộ nhớ dữ liệu hồ sơ
         SharedPreferences prefs = getSharedPreferences(ProfileEditActivity.PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().clear().apply();

@@ -77,6 +77,18 @@ public final class ChatUi {
         return new SimpleDateFormat("dd/MM", Locale.getDefault()).format(date);
     }
 
+    /** "vừa xong", "5 phút trước", "2 giờ trước", "3 ngày trước"... */
+    public static String ago(Date date) {
+        long minutes = Math.max(0, (System.currentTimeMillis() - date.getTime()) / 60000);
+        if (minutes < 1) return "vừa xong";
+        if (minutes < 60) return minutes + " phút trước";
+        if (minutes < 24 * 60) return (minutes / 60) + " giờ trước";
+        long days = minutes / (24 * 60);
+        if (days < 30) return days + " ngày trước";
+        if (days < 365) return (days / 30) + " tháng trước";
+        return (days / 365) + " năm trước";
+    }
+
     private static boolean sameDay(Calendar a, Calendar b) {
         return a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR);
     }

@@ -356,6 +356,9 @@ Mọi tin 2 chiều đều là JSON `{ "event": "...", "data": { ... } }`. Serve
 | `typing` | `{ matchId, isTyping }` | Báo đang nhập |
 | `call.signal` | `{ callId, signal }` | Gửi gói WebRTC cho máy kia (`signal` tuỳ app: offer / answer / candidate / tắt mic...) |
 
+App Android (từ bản v4.2) dùng quy ước `signal` sau: người nhận gửi `{type:"ready"}` khi đã sẵn sàng → người gọi gửi
+`{type:"offer", sdp}` → người nhận gửi `{type:"answer", sdp}`; cả hai gửi `{type:"candidate", candidate, sdpMid, sdpMLineIndex}`.
+
 Gửi tin nhắn, đã đọc, bắt đầu / nhấc / cúp cuộc gọi đều dùng **REST**; WebSocket chỉ để nhận sự kiện (và `typing`, `call.signal`).
 Người nhận không mở app thì server gửi thông báo đẩy thay cho WebSocket.
 

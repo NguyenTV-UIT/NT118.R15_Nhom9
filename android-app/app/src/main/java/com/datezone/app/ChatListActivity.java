@@ -116,13 +116,18 @@ public class ChatListActivity extends AppCompatActivity {
         setupBottomNavigation();
     }
 
+    /** Mất WebSocket: tự làm mới 5 giây / lần. Có WebSocket: làm mới ngay khi có sự kiện, chỉ đối chiếu thưa. */
     private static final long REFRESH_MS = 5000;
+    private static final long REFRESH_REALTIME_MS = 30000;
+    private final com.datezone.app.api.Realtime.Listener realtimeListener = (event, data) -> {
+        if ("message.new".equals(event) || "message.read".equals(event) || "match.new".equals(event)
+                || "match.removed".equals(event) || com.datezone.app.api.Realtime.EVENT_OPEN.equals(event)) loadChats();
+    };
     private final android.os.Handler refreshHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable refreshTask = new Runnable() {
         @Override public void run() {
             loadChats();
-            com.datezone.app.api.IncomingCalls.check(ChatListActivity.this);
-            refreshHandler.postDelayed(this, REFRESH_MS);
+            refreshHandler.postDelayed(this, com.datezone.app.api.Realtime.get().isConnected() ? REFRESH_REALTIME_MS : REFRESH_MS);
         }
     };
 
@@ -131,11 +136,13 @@ public class ChatListActivity extends AppCompatActivity {
         super.onResume();
         refreshHandler.removeCallbacks(refreshTask);
         refreshHandler.post(refreshTask);
+        com.datezone.app.api.Realtime.get().addListener(realtimeListener);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        com.datezone.app.api.Realtime.get().removeListener(realtimeListener);
         refreshHandler.removeCallbacks(refreshTask);
     }
 

@@ -41,6 +41,10 @@ public class OtpVerificationActivity extends AppCompatActivity {
     private int resendAfter = 30;
     private long resendAvailableAt;
     private String resetToken;
+    /** FLOW_CHANGE_EMAIL (máy chủ bật xác thực email mới): mã chờ xác nhận + mã phiên đổi email để gửi lại OTP. */
+    public static final String EXTRA_PENDING_TOKEN = "EXTRA_PENDING_TOKEN";
+    public static final String EXTRA_EMAIL_CHANGE_TOKEN = "EXTRA_EMAIL_CHANGE_TOKEN";
+    private String pendingToken;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -119,6 +123,7 @@ public class OtpVerificationActivity extends AppCompatActivity {
         });
 
         resendAfter = getIntent().getIntExtra("resendAfter", 30);
+        pendingToken = getIntent().getStringExtra(EXTRA_PENDING_TOKEN);
         if (savedInstanceState != null) resendAvailableAt = savedInstanceState.getLong("resendAvailableAt");
         startResendTimer();
     }
@@ -198,6 +203,22 @@ public class OtpVerificationActivity extends AppCompatActivity {
                     });
             return;
         }
+        if (FLOW_CHANGE_EMAIL.equals(flowType) && pendingToken != null) {
+            // Đổi email bước cuối (khi máy chủ yêu cầu): OTP gửi tới email MỚI -> POST /users/me/email/confirm
+            com.datezone.app.api.ApiUi.send(this, R.id.btnVerify, true, "POST", "users/me/email/confirm",
+                    com.datezone.app.api.ApiUi.data("pendingToken", pendingToken, "otp", otp), response -> {
+                        String saved = response.getJSONObject("data").optString("email", email);
+                        com.datezone.app.api.SessionStore store = new com.datezone.app.api.SessionStore(this);
+                        org.json.JSONObject user = store.user();
+                        user.put("email", saved);
+                        store.saveUser(user);
+                        Intent intent = new Intent(OtpVerificationActivity.this, ChangeEmailSuccessActivity.class);
+                        intent.putExtra(EXTRA_EMAIL, saved);
+                        startActivity(intent);
+                        finish();
+                    });
+            return;
+        }
         if (!FLOW_FORGOT_PASSWORD.equals(flowType)) {
             Toast.makeText(this, "Chức năng xác minh này chưa được máy chủ hỗ trợ.", Toast.LENGTH_LONG).show();
             return;
@@ -256,6 +277,21 @@ public class OtpVerificationActivity extends AppCompatActivity {
             com.datezone.app.api.ApiUi.send(this, R.id.tvResendOtp, true, "POST", "users/me/email/verify-current",
                     com.datezone.app.api.ApiUi.data("email", email), response -> {
                         resendAfter = response.getJSONObject("data").optInt("resendAfter", 30);
+                        resendAvailableAt = 0;
+                        for (EditText box : otpBoxes) box.setText("");
+                        otpBoxes[0].requestFocus();
+                        startResendTimer();
+                    });
+            return;
+        }
+        if (FLOW_CHANGE_EMAIL.equals(flowType) && pendingToken != null) {
+            // Gửi lại OTP tới email mới = gọi lại bước đổi email, nhận mã chờ mới
+            com.datezone.app.api.ApiUi.send(this, R.id.tvResendOtp, true, "PUT", "users/me/email",
+                    com.datezone.app.api.ApiUi.data("emailChangeToken", getIntent().getStringExtra(EXTRA_EMAIL_CHANGE_TOKEN), "newEmail", email),
+                    response -> {
+                        org.json.JSONObject data = response.getJSONObject("data");
+                        pendingToken = data.optString("pendingToken", pendingToken);
+                        resendAfter = data.optInt("resendAfter", 30);
                         resendAvailableAt = 0;
                         for (EditText box : otpBoxes) box.setText("");
                         otpBoxes[0].requestFocus();

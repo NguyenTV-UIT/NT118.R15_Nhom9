@@ -133,18 +133,17 @@ public class SettingsActivity extends AppCompatActivity {
             @Override public void onSuccess(org.json.JSONObject response) throws Exception {
                 org.json.JSONArray sessions = response.getJSONArray("data");
                 org.json.JSONObject current = null, other = null;
-                int others = 0;
+                android.widget.LinearLayout more = findViewById(R.id.layoutSettingsOtherDevices);
+                if (more != null) more.removeAllViews();
                 for (int i = 0; i < sessions.length(); i++) {
                     org.json.JSONObject session = sessions.getJSONObject(i);
                     if (session.optBoolean("current")) current = session;
-                    else {
-                        if (other == null) other = session;
-                        others++;
-                    }
+                    else if (other == null) other = session; // thiết bị khác đầu tiên dùng dòng có sẵn trong layout
+                    else if (more != null) addDeviceRow(more, session);
                 }
                 if (current != null) {
                     setText(R.id.tvSettingsCurrentDeviceName, com.datezone.app.api.ChatUi.text(current, "deviceName"));
-                    setText(R.id.tvSettingsCurrentDeviceInfo, sessionInfo(current, 0));
+                    setText(R.id.tvSettingsCurrentDeviceInfo, sessionInfo(current));
                 }
                 otherSessionId = other == null ? 0 : other.optLong("id");
                 int visibility = other == null ? View.GONE : View.VISIBLE;
@@ -156,7 +155,7 @@ public class SettingsActivity extends AppCompatActivity {
                 if (logoutAll != null) logoutAll.setVisibility(visibility);
                 if (other != null) {
                     setText(R.id.tvSettingsOtherDeviceName, com.datezone.app.api.ChatUi.text(other, "deviceName"));
-                    setText(R.id.tvSettingsOtherDeviceInfo, sessionInfo(other, others - 1));
+                    setText(R.id.tvSettingsOtherDeviceInfo, sessionInfo(other));
                 }
             }
             @Override public void onError(String message) { }
@@ -168,13 +167,22 @@ public class SettingsActivity extends AppCompatActivity {
         if (view != null) view.setText(text);
     }
 
-    private static String sessionInfo(org.json.JSONObject session, int more) {
+    /** Thêm 1 dòng thiết bị (từ thiết bị khác thứ 2 trở đi) kèm nút Đăng xuất riêng. */
+    private void addDeviceRow(android.widget.LinearLayout container, org.json.JSONObject session) {
+        View row = getLayoutInflater().inflate(R.layout.item_settings_device, container, false);
+        long sessionId = session.optLong("id");
+        ((android.widget.TextView) row.findViewById(R.id.tvDeviceName)).setText(com.datezone.app.api.ChatUi.text(session, "deviceName"));
+        ((android.widget.TextView) row.findViewById(R.id.tvDeviceInfo)).setText(sessionInfo(session));
+        row.findViewById(R.id.btnDeviceLogout).setOnClickListener(v -> showLogoutDeviceDialog(sessionId));
+        container.addView(row);
+    }
+
+    private static String sessionInfo(org.json.JSONObject session) {
         String location = com.datezone.app.api.ChatUi.text(session, "location");
         java.util.Date active = com.datezone.app.api.ChatUi.parseTime(session.optString("lastActiveAt"));
         String when = session.optBoolean("active") || session.optBoolean("current") ? "Đang hoạt động"
                 : active == null ? "" : ago(active);
-        String info = location.isEmpty() ? when : when.isEmpty() ? location : location + " · " + when;
-        return more > 0 ? info + " (+" + more + " thiết bị khác)" : info;
+        return location.isEmpty() ? when : when.isEmpty() ? location : location + " · " + when;
     }
 
     private void updateSavedEmailDisplay() {
@@ -216,7 +224,7 @@ public class SettingsActivity extends AppCompatActivity {
         // Đăng xuất thiết bị phụ
         View btnLogoutDevice = findViewById(R.id.btnSettingsLogoutDevice);
         if (btnLogoutDevice != null) {
-            btnLogoutDevice.setOnClickListener(v -> showLogoutDeviceDialog());
+            btnLogoutDevice.setOnClickListener(v -> showLogoutDeviceDialog(otherSessionId));
         }
 
         // Đăng xuất khỏi tất cả thiết bị khác
@@ -261,7 +269,7 @@ public class SettingsActivity extends AppCompatActivity {
         dialog.show();
     }
 
-    private void showLogoutDeviceDialog() {
+    private void showLogoutDeviceDialog(long sessionId) {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_logout_device, null);
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(dialogView)
@@ -273,9 +281,9 @@ public class SettingsActivity extends AppCompatActivity {
 
         dialogView.findViewById(R.id.btnDialogConfirmLogoutDevice).setOnClickListener(v -> {
             dialog.dismiss();
-            if (otherSessionId <= 0) return;
+            if (sessionId <= 0) return;
             // DELETE /users/me/sessions/:id - đăng xuất thiết bị đó ngay lập tức
-            api().request(this, "DELETE", "users/me/sessions/" + otherSessionId, null, new com.datezone.app.api.ApiClient.Callback() {
+            api().request(this, "DELETE", "users/me/sessions/" + sessionId, null, new com.datezone.app.api.ApiClient.Callback() {
                 @Override public void onSuccess(org.json.JSONObject response) {
                     Toast.makeText(SettingsActivity.this, "Đã đăng xuất khỏi thiết bị", Toast.LENGTH_LONG).show();
                     loadSessions();

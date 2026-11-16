@@ -100,7 +100,19 @@ public class MatchesActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         loadLikes();
+        com.datezone.app.api.Realtime.get().addListener(realtimeListener);
     }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        com.datezone.app.api.Realtime.get().removeListener(realtimeListener);
+    }
+
+    /** Có người vừa thích mình -> danh sách tự cập nhật. */
+    private final com.datezone.app.api.Realtime.Listener realtimeListener = (event, data) -> {
+        if ("like.new".equals(event)) loadLikes();
+    };
 
     /** GET /home/likes - những người đã thích mình mà mình chưa quẹt, chia nhóm Hôm nay / Hôm qua / Trước đó. */
     private void loadLikes() {

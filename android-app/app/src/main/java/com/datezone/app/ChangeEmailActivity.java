@@ -94,7 +94,15 @@ public class ChangeEmailActivity extends AppCompatActivity {
                 com.datezone.app.api.ApiUi.data("emailChangeToken", token, "newEmail", newEmail), response -> {
                     org.json.JSONObject data = response.getJSONObject("data");
                     if (data.optBoolean("otpRequired")) {
-                        Toast.makeText(this, "Máy chủ yêu cầu xác thực email mới bằng OTP, app chưa hỗ trợ bước này.", Toast.LENGTH_LONG).show();
+                        // Máy chủ bật EMAIL_CHANGE_VERIFY_NEW: nhập thêm OTP vừa gửi tới email mới
+                        Intent otp = new Intent(ChangeEmailActivity.this, OtpVerificationActivity.class);
+                        otp.putExtra(OtpVerificationActivity.EXTRA_FLOW_TYPE, OtpVerificationActivity.FLOW_CHANGE_EMAIL);
+                        otp.putExtra(OtpVerificationActivity.EXTRA_EMAIL, newEmail);
+                        otp.putExtra(OtpVerificationActivity.EXTRA_PENDING_TOKEN, data.getString("pendingToken"));
+                        otp.putExtra(OtpVerificationActivity.EXTRA_EMAIL_CHANGE_TOKEN, token);
+                        otp.putExtra("resendAfter", data.optInt("resendAfter", 30));
+                        startActivity(otp);
+                        finish();
                         return;
                     }
                     String saved = data.optString("email", newEmail);

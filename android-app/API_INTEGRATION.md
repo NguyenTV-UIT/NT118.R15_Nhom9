@@ -81,8 +81,7 @@ nếu thông tin cơ bản đã lưu nhưng sở thích lỗi, app thông báo p
 
 ## Đợt nối API v4 (lượt thích, chat, cuộc gọi, cài đặt, an toàn)
 
-Đợt này **chưa được build / chạy thử trên máy thật hay giả lập** (môi trường viết code không có Android SDK);
-mới kiểm tra cú pháp Java và XML. Trước khi merge cần build bằng Android Studio và chạy qua các luồng dưới đây.
+Bảng dưới là trạng thái của đợt v4; các dòng nói "tự làm mới / hỏi lại định kỳ" đã được thay bằng realtime ở bản v4.2 (xem cuối trang).
 
 | Màn hình | API | Ghi chú |
 |---|---|---|
@@ -106,16 +105,43 @@ Lớp dùng chung mới: `api/ChatUi` (avatar, giờ, mở chat), `api/IncomingC
 
 ### Giới hạn còn lại
 
-- **Chưa có WebSocket**: app chưa có thư viện WebSocket nên chat và danh sách chat dùng cách hỏi lại định kỳ.
-  Tin nhắn tới chậm tối đa ~3 giây; chưa có "đang nhập" và trạng thái online tức thời.
-- **Cuộc gọi chưa có âm thanh / hình ảnh thật**: app mới đăng ký cuộc gọi với máy chủ (đổ chuông, nhấc máy,
-  từ chối, kết thúc, gọi nhỡ, nhật ký trong chat). Muốn nghe / thấy nhau cần thêm thư viện WebRTC và trao đổi
-  gói qua WebSocket (`call.signal`). Cuộc gọi đến chỉ được phát hiện khi đang mở màn Tin nhắn hoặc màn chat.
-- **Thông báo đẩy** (FCM) chưa nối: chưa gọi `POST /users/me/device-token`.
-- Màn Cài đặt chỉ hiện 1 thiết bị khác (layout có sẵn 1 dòng); các thiết bị còn lại ghi dạng "+N thiết bị khác".
-- Mở lại màn Bộ lọc không khôi phục các lựa chọn nâng cao đã áp dụng lần trước.
-- Đổi email khi máy chủ bật `EMAIL_CHANGE_VERIFY_NEW=true` (OTP gửi tới email mới) chưa có màn tương ứng.
-- Hồ sơ mở từ màn chat dùng `ProfileObject2Activity` ở chế độ chỉ xem (ẩn nút Thích / Bỏ qua).
+Xem phần "Bản v4.2" bên dưới: phần lớn giới hạn của đợt v4 đã được xử lý.
+
+## Bản v4.2: realtime, âm thanh / hình ảnh cuộc gọi
+
+Cách kiểm tra đợt này: toàn bộ mã Java của app được **biên dịch thử** với `android.jar` thật (API 35), mã nguồn
+`org.webrtc` thật của thư viện và bản mô phỏng (stub) cho androidx / Material — không còn lỗi biên dịch. Riêng
+`WsConnection` được **chạy thật** với máy chủ (bắt tay, nhận sự kiện máy chủ đẩy, khung 70 KB, tiếng Việt, mã đóng 4401).
+App vẫn **chưa được build bằng Gradle và chưa chạy trên máy thật / giả lập**; phần WebRTC chưa được gọi thử lần nào.
+
+| Hạng mục | Thay đổi |
+|---|---|
+| Realtime | `api/WsConnection` (WebSocket viết bằng thư viện chuẩn, không thêm dependency) + `api/Realtime` (1 kết nối dùng chung, tự nối lại, tự làm mới token khi bị đóng mã 4401). `DateZoneApp` mở kết nối khi app lên trước màn hình, đóng sau 5 giây xuống nền (trừ khi đang gọi) |
+| Chat | Tin nhắn tới tức thì (`message.new`), nhãn "Đã xem" (`message.read`), "đang nhập…" (`typing`), "Đang online / Hoạt động x phút trước" (`presence`), tự đóng khi bị huỷ tương hợp (`match.removed`). Vẫn hỏi lại định kỳ để dự phòng: 25 giây khi có WebSocket, 3 giây khi mất |
+| Danh sách chat, Lượt thích | Tự làm mới khi có `message.new`, `message.read`, `match.new`, `match.removed`, `like.new` |
+| Cuộc gọi đến | Hộp thoại Nghe / Từ chối hiện ở **mọi màn hình** (sự kiện `call.incoming`), tự đóng nếu người gọi cúp trước |
+| Âm thanh / hình ảnh | `api/CallMedia` dùng WebRTC (`io.getstream:stream-webrtc-android`): mic, loa ngoài / loa trong / tắt tiếng, camera trước / sau, bật / tắt hình. Thu nhỏ cuộc gọi vẫn nghe được. App xin quyền micro (và camera khi gọi video) |
+| Cài đặt | Hiện **tất cả** thiết bị khác, mỗi thiết bị có nút Đăng xuất riêng (`item_settings_device.xml`) |
+| Bộ lọc | Mở lại màn Bộ lọc khôi phục đúng các lựa chọn nâng cao đã áp dụng |
+| Đổi email | Hỗ trợ bước OTP gửi tới email mới khi máy chủ bật `EMAIL_CHANGE_VERIFY_NEW=true` (`POST /users/me/email/confirm`) |
+
+Quy ước tín hiệu cuộc gọi (sự kiện `call.signal`, máy chủ chỉ chuyển tiếp):
+người nhận gửi `{type:"ready"}` (lặp lại tới khi nhận offer) → người gọi gửi `{type:"offer", sdp}` → người nhận gửi
+`{type:"answer", sdp}`; cả hai gửi `{type:"candidate", candidate, sdpMid, sdpMLineIndex}`.
+
+### Cần kiểm tra khi chạy thật
+
+1. Gradle tải được `io.getstream:stream-webrtc-android:1.3.9` (khai báo trong `gradle/libs.versions.toml`).
+2. Hai máy đăng nhập 2 tài khoản đã thân thiết 20/20 (`npm run db:simulate-chat` trên máy chủ), gọi thoại rồi gọi video.
+3. Hai máy ở **2 mạng khác nhau** (ví dụ 4G và wifi) có thể không nghe được nhau nếu chỉ dùng STUN: cần dựng máy chủ TURN
+   và khai báo `ICE_SERVERS` trong `.env` của backend.
+
+### Giới hạn còn lại sau v4.2
+
+- **Thông báo đẩy (FCM) chưa có**: cần tạo dự án Firebase và file `google-services.json`. Vì vậy khi app đang ở nền hoặc
+  đã tắt, tin nhắn và cuộc gọi đến không hiện thông báo (cuộc gọi sẽ thành gọi nhỡ).
+- Xu hướng tính dục, vị trí, mốc khoảng cách trong Bộ lọc vẫn tắt vì hồ sơ trên máy chủ chưa có dữ liệu tương ứng.
+- Màn hình cuộc gọi đến là hộp thoại đơn giản, chưa có nhạc chuông và chưa có màn hình toàn màn hình.
 
 ## Kiểm tra
 

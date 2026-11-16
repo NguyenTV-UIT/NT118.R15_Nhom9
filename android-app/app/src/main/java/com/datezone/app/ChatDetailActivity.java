@@ -43,7 +43,18 @@ public class ChatDetailActivity extends AppCompatActivity {
     public static final String EXTRA_MATCH_ID = "EXTRA_MATCH_ID";
     public static final String EXTRA_PHOTO_URL = "EXTRA_PHOTO_URL";
     public static final String EXTRA_PARTNER_ID = "EXTRA_PARTNER_ID";
+    /** Mất WebSocket: hỏi lại 3 giây / lần. Đang có WebSocket: tin tới tức thì, chỉ hỏi thưa để đối chiếu. */
     private static final long POLL_INTERVAL_MS = 3000;
+    private static final long POLL_INTERVAL_REALTIME_MS = 25000;
+    private static final long TYPING_SEND_GAP_MS = 2500;
+    private static final long TYPING_SHOW_MS = 4500;
+
+    private long partnerId;
+    private long lastTypingSentAt;
+    private TextView tvPartnerStatus;
+    private TextView seenLabel;
+    private final Runnable clearTyping = this::showPresence;
+    private final com.datezone.app.api.Realtime.Listener realtimeListener = this::onRealtimeEvent;
 
     private long matchId;
     private boolean remote;
@@ -59,7 +70,7 @@ public class ChatDetailActivity extends AppCompatActivity {
     private final Runnable pollTask = new Runnable() {
         @Override public void run() {
             pollNewMessages();
-            pollHandler.postDelayed(this, POLL_INTERVAL_MS);
+            pollHandler.postDelayed(this, pollInterval());
         }
     };
 
@@ -179,6 +190,7 @@ public class ChatDetailActivity extends AppCompatActivity {
         matchId = intent != null ? intent.getLongExtra(EXTRA_MATCH_ID, 0) : 0;
         remote = matchId > 0;
         if (remote) {
+            partnerId = intent.getLongExtra(EXTRA_PARTNER_ID, 0);
             api = new com.datezone.app.api.ApiClient(this);
             String url = intent.getStringExtra(EXTRA_PHOTO_URL);
             targetPhotoUrl = url == null ? "" : url;
@@ -219,16 +231,110 @@ public class ChatDetailActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (remote) com.datezone.app.api.Realtime.get().addListener(realtimeListener);
         if (remote && polling) {
             pollHandler.removeCallbacks(pollTask);
-            pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+            pollHandler.post(pollTask); // quay lại màn hình: lấy bù tin đã lỡ ngay
         }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        com.datezone.app.api.Realtime.get().removeListener(realtimeListener);
         pollHandler.removeCallbacks(pollTask);
+        pollHandler.removeCallbacks(clearTyping);
+    }
+
+    private static long pollInterval() {
+        return com.datezone.app.api.Realtime.get().isConnected() ? POLL_INTERVAL_REALTIME_MS : POLL_INTERVAL_MS;
+    }
+
+    // ═══════════════ REALTIME (WebSocket) ═══════════════
+
+    private void onRealtimeEvent(String event, org.json.JSONObject data) {
+        if (!remote || isFinishing()) return;
+        if ("message.new".equals(event)) {
+            org.json.JSONObject message = data.optJSONObject("message");
+            if (message == null || message.optLong("matchId") != matchId) return;
+            if (showMessage(message)) {
+                markRead();
+                showPresence(); // người kia vừa gửi xong -> hết "đang nhập"
+            }
+            applyIntimacy(data.optJSONObject("intimacy"));
+        } else if ("message.read".equals(event)) {
+            if (data.optLong("matchId") == matchId && data.optLong("readerId") == partnerId) showSeen();
+        } else if ("typing".equals(event)) {
+            if (data.optLong("matchId") != matchId || data.optLong("userId") != partnerId) return;
+            pollHandler.removeCallbacks(clearTyping);
+            if (data.optBoolean("isTyping", true)) {
+                setStatus("đang nhập…", 0xFF22C55E);
+                pollHandler.postDelayed(clearTyping, TYPING_SHOW_MS);
+            } else {
+                showPresence();
+            }
+        } else if ("presence".equals(event)) {
+            if (data.optLong("userId") != partnerId || partnerJson == null) return;
+            try {
+                partnerJson.put("isOnline", data.optBoolean("isOnline"));
+                partnerJson.put("lastActiveAt", data.optString("lastActiveAt"));
+            } catch (org.json.JSONException ignored) { }
+            showPresence();
+        } else if ("match.removed".equals(event)) {
+            if (data.optLong("matchId") != matchId) return;
+            Toast.makeText(this, "Cuộc trò chuyện này đã kết thúc", Toast.LENGTH_LONG).show();
+            finish();
+        } else if (com.datezone.app.api.Realtime.EVENT_OPEN.equals(event)) {
+            if (polling) pollNewMessages(); // vừa nối lại: lấy bù tin trong lúc mất kết nối
+        }
+    }
+
+    private void setStatus(String text, int color) {
+        if (tvPartnerStatus == null) tvPartnerStatus = findViewById(R.id.tvChatPartnerStatus);
+        if (tvPartnerStatus == null) return;
+        tvPartnerStatus.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+        tvPartnerStatus.setText(text);
+        tvPartnerStatus.setTextColor(color);
+    }
+
+    /** Dòng trạng thái dưới tên: "Đang online" / "Hoạt động x phút trước" / ẩn nếu người kia tắt hiển thị. */
+    private void showPresence() {
+        if (!remote) return;
+        if (partnerJson == null || partnerJson.isNull("isOnline")) { setStatus("", 0); return; }
+        if (partnerJson.optBoolean("isOnline")) { setStatus("Đang online", 0xFF22C55E); return; }
+        java.util.Date last = com.datezone.app.api.ChatUi.parseTime(partnerJson.optString("lastActiveAt"));
+        setStatus(last == null ? "" : "Hoạt động " + com.datezone.app.api.ChatUi.ago(last), ContextCompat.getColor(this, R.color.text_secondary));
+    }
+
+    /** Nhãn "Đã xem" dưới tin cuối cùng mình gửi. */
+    private void showSeen() {
+        if (layoutMessagesList == null) return;
+        if (seenLabel == null) {
+            seenLabel = new TextView(this);
+            seenLabel.setText("Đã xem");
+            seenLabel.setTextSize(11f);
+            seenLabel.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.gravity = Gravity.END;
+            params.setMargins(0, 0, 8, 8);
+            seenLabel.setLayoutParams(params);
+        }
+        hideSeen();
+        layoutMessagesList.addView(seenLabel);
+        scrollToBottom();
+    }
+
+    private void hideSeen() {
+        if (seenLabel != null && seenLabel.getParent() != null) ((android.view.ViewGroup) seenLabel.getParent()).removeView(seenLabel);
+    }
+
+    /** Báo "đang nhập" cho người kia (tối đa 1 lần / 2,5 giây). */
+    private void notifyTyping() {
+        long now = System.currentTimeMillis();
+        if (!remote || now - lastTypingSentAt < TYPING_SEND_GAP_MS) return;
+        lastTypingSentAt = now;
+        com.datezone.app.api.Realtime.get().send("typing", com.datezone.app.api.ApiUi.data("matchId", matchId, "isTyping", true));
     }
 
     // ═══════════════ DỮ LIỆU THẬT TỪ MÁY CHỦ ═══════════════
@@ -242,7 +348,9 @@ public class ChatDetailActivity extends AppCompatActivity {
                 targetName = com.datezone.app.api.ChatUi.text(partnerJson, "displayName");
                 targetAge = partnerJson.isNull("age") ? "" : String.valueOf(partnerJson.optInt("age"));
                 targetPhotoUrl = com.datezone.app.api.ChatUi.avatar(partnerJson);
+                partnerId = partnerJson.optLong("id");
                 setupPartnerHeader();
+                showPresence();
                 applyIntimacy(data.optJSONObject("intimacy"));
                 loadMessages();
             }
@@ -260,10 +368,12 @@ public class ChatDetailActivity extends AppCompatActivity {
                 boolean hasIncoming = false;
                 for (int i = 0; i < items.length(); i++) hasIncoming |= showMessage(items.getJSONObject(i));
                 if (items.length() == 0) addSystemNoticePill("Hai bạn đã tương hợp. Hãy gửi lời chào đầu tiên!");
+                org.json.JSONObject newest = items.length() == 0 ? null : items.getJSONObject(items.length() - 1);
+                if (newest != null && newest.optBoolean("fromMe") && newest.optBoolean("isRead")) showSeen();
                 if (hasIncoming) markRead();
                 polling = true;
                 pollHandler.removeCallbacks(pollTask);
-                pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+                pollHandler.postDelayed(pollTask, pollInterval());
             }
             @Override public void onError(String message) {
                 Toast.makeText(ChatDetailActivity.this, message, Toast.LENGTH_LONG).show();
@@ -274,7 +384,6 @@ public class ChatDetailActivity extends AppCompatActivity {
     /** Cứ 3 giây hỏi máy chủ tin mới hơn tin cuối đang hiển thị (GET ...?after=<id>). */
     private void pollNewMessages() {
         if (!remote || isFinishing()) return;
-        com.datezone.app.api.IncomingCalls.check(this);
         api.request(this, "GET", "chats/" + matchId + "/messages?limit=50&after=" + lastMessageId, null,
                 new com.datezone.app.api.ApiClient.Callback() {
                     @Override public void onSuccess(org.json.JSONObject response) throws Exception {
@@ -304,6 +413,7 @@ public class ChatDetailActivity extends AppCompatActivity {
         if (id <= 0 || !shownMessageIds.add(id)) return false;
         if (id > lastMessageId) lastMessageId = id;
         boolean fromMe = message.optBoolean("fromMe");
+        hideSeen(); // có tin mới hơn -> nhãn "Đã xem" cũ không còn đúng vị trí
         String type = message.optString("type", "text");
         if ("image".equals(type)) {
             addRemotePhoto(com.datezone.app.api.ChatUi.text(message, "imageUrl"), fromMe);
@@ -571,6 +681,17 @@ public class ChatDetailActivity extends AppCompatActivity {
     }
 
     private void setupListeners() {
+        if (remote && edtChatMessage != null) {
+            setStatus("", 0); // ẩn chữ "Đang online" mẫu cho tới khi có dữ liệu thật
+            edtChatMessage.addTextChangedListener(new android.text.TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+                @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                    if (text.length() > 0) notifyTyping();
+                }
+                @Override public void afterTextChanged(android.text.Editable editable) { }
+            });
+        }
+
         // Nút Back
         findViewById(R.id.btnChatBack).setOnClickListener(v -> finish());
 

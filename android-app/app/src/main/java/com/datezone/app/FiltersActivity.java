@@ -201,6 +201,48 @@ public class FiltersActivity extends AppCompatActivity {
         } catch (Exception ignored) { /* Keep valid defaults if no previous query exists. */ }
         String ids = uri.getQueryParameter("interestIds");
         if (ids != null && !ids.isEmpty()) java.util.Collections.addAll(selectedInterestIds, ids.split(","));
+
+        // Khôi phục bộ lọc nâng cao đã áp dụng lần trước
+        heightTouched = restoreRange(uri, "minHeight", "maxHeight", sliderHeight);
+        weightTouched = restoreRange(uri, "minWeight", "maxWeight", sliderWeight);
+        restoreChips(uri, "relationshipGoal", chipGroupFiltersRelationship, null);
+        restoreChips(uri, "zodiac", chipGroupFiltersZodiac, chipFiltersZodiacAny);
+        restoreChips(uri, "smoking", chipGroupFiltersSmoking, chipFiltersSmokingAny);
+        restoreChips(uri, "drinking", chipGroupFiltersDrinking, chipFiltersDrinkingAny);
+        restoreChips(uri, "exercise", chipGroupFiltersExercise, chipFiltersExerciseAny);
+        restoreChips(uri, "education", chipGroupFiltersEducation, chipFiltersEducationAny);
+        updateRelationshipSummary();
+        updateSingleOrAnySummary(chipGroupFiltersZodiac, chipFiltersZodiacAny, tvZodiacSummary);
+        updateSingleOrAnySummary(chipGroupFiltersSmoking, chipFiltersSmokingAny, tvSmokingSummary);
+        updateSingleOrAnySummary(chipGroupFiltersDrinking, chipFiltersDrinkingAny, tvDrinkingSummary);
+        updateSingleOrAnySummary(chipGroupFiltersExercise, chipFiltersExerciseAny, tvExerciseSummary);
+        updateSingleOrAnySummary(chipGroupFiltersEducation, chipFiltersEducationAny, tvEducationSummary);
+    }
+
+    /** Đặt lại 2 đầu thanh trượt theo query. Trả về true nếu query có bộ lọc này. */
+    private boolean restoreRange(Uri uri, String minKey, String maxKey, RangeSlider slider) {
+        String min = uri.getQueryParameter(minKey);
+        String max = uri.getQueryParameter(maxKey);
+        if (slider == null || min == null || max == null) return false;
+        try {
+            float low = Math.max(slider.getValueFrom(), Math.min(slider.getValueTo(), Float.parseFloat(min)));
+            float high = Math.max(low, Math.min(slider.getValueTo(), Float.parseFloat(max)));
+            slider.setValues(low, high);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /** Chọn lại các chip có trong query (so theo nhãn chip). */
+    private void restoreChips(Uri uri, String key, ChipGroup group, Chip anyChip) {
+        java.util.List<String> values = uri.getQueryParameters(key);
+        if (group == null || values == null || values.isEmpty()) return;
+        touchedGroups.add(group);
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof Chip) ((Chip) child).setChecked(child != anyChip && values.contains(((Chip) child).getText().toString()));
+        }
     }
 
     private void loadInterests() {
